@@ -6,8 +6,8 @@ import os
 spark = SparkSession.builder \
     .appName("CSV to MD5 Hash") \
     .getOrCreate()
-input_folder_path = "C:\\GitHub\\Sample_PyPrj\\inputfiles\\"
-ouput_folder_path = "C:\\GitHub\\Sample_PyPrj\\outputfiles\\"
+input_folder_path = "C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\"
+ouput_folder_path = "C:\\Github\\MyUtilities\\Day2Day_Utillites\\outputfiles\\"
 
 for filename in os.listdir(input_folder_path):
     if filename.endswith(".csv"):        

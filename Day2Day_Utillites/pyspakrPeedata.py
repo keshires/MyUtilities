@@ -8,7 +8,7 @@ spark = SparkSession.builder \
     .getOrCreate()
 
 # Path to the CSV file (update this to your file's path)
-csv_file_path = 'C:\\GitHub\\Sample_PyPrj\\inputfiles\\edfx-24714_Landing_QA.csv'
+csv_file_path = 'C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\edfx-24714_Landing_QA.csv'
 
 # Load CSV into Spark DataFrame
 results_df = spark.read.csv(csv_file_path, inferSchema=True, header=True)

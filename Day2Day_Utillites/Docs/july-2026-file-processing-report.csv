@@ -1,0 +1,56 @@
+section,metric,value,notes
+Executive Summary,Rate measurement window,Jun 5 4PM - Jun 8,
+Executive Summary,June carryover backlog (Jun 8),82246,Latest snapshot
+Executive Summary,Projected Jul 1-10 new intake,1800000-2000000,Based on June days 1-10 analog
+Executive Summary,Total July workload,2045246,Carryover + Jul 1-10 base case
+Executive Summary,Demonstrated processing rate,465908,Jun 5 4PM - Jun 8 (files/day)
+Executive Summary,Peak queue (base case),1034092,Jul 3 intraday max
+Executive Summary,Cleared by,Jul 10,Base case
+Rate Window (Jun 5 4PM - Jun 8),Duration hours,64,Through Jun 8 ~8AM
+Rate Window (Jun 5 4PM - Jun 8),Files processed,1242422,
+Rate Window (Jun 5 4PM - Jun 8),Inflow during window,112908,
+Rate Window (Jun 5 4PM - Jun 8),Queue start,1211760,Jun 5 4PM
+Rate Window (Jun 5 4PM - Jun 8),Queue end,82246,Jun 8
+Rate Window (Jun 5 4PM - Jun 8),Net reduction pct,93%,
+Jun 8 Latest Snapshot,2026-06-08 CCA,3738,Just arrived
+Jun 8 Latest Snapshot,2026-06-07 CCA,76687,In progress
+Jun 8 Latest Snapshot,2026-06-04 CCA,51,Nearly cleared
+Jun 8 Latest Snapshot,2026-06-04 open_search_ingestion,1770,Nearly cleared
+Jun 8 Latest Snapshot,Total queue,82246,
+Jun 7 PM to Jun 8 Processed,2026-06-03 CCA,59233,Cleared entirely
+Jun 7 PM to Jun 8 Processed,2026-06-07 CCA,32483,109170 to 76687
+Jun 7 PM to Jun 8 Processed,2026-06-04 CCA,643,
+Jun 7 PM to Jun 8 Processed,2026-06-04 open_search_ingestion,758,
+Jun 7 PM to Jun 8 Inflow,2026-06-08 CCA,3738,New batch
+July Intake Forecast,2026-07-01,96000,Jun 1 analog
+July Intake Forecast,2026-07-02,814000,Jun 2 analog - heavy day
+July Intake Forecast,2026-07-03,686000,Jun 3 analog - heavy day
+July Intake Forecast,2026-07-04,8000,Jun 4 analog
+July Intake Forecast,2026-07-05,50000,Estimate
+July Intake Forecast,2026-07-06,50000,Estimate
+July Intake Forecast,2026-07-07,109000,Jun 7 analog
+July Intake Forecast,2026-07-08,50000,Estimate (Jun 8 was 3738)
+July Intake Forecast,2026-07-09,50000,Estimate
+July Intake Forecast,2026-07-10,50000,Estimate
+July Intake Forecast,Jul 1-10 subtotal,1963000,
+July Intake Forecast,June carryover,82246,
+July Intake Forecast,Total workload,2045246,
+July Daily Simulation (466K/day),Start queue,82246,Jun 8 carryover
+July Daily Simulation (466K/day),Jul 1 end queue,0,
+July Daily Simulation (466K/day),Jul 2 end queue,348092,
+July Daily Simulation (466K/day),Jul 3 end queue,568184,Peak intraday 1034092
+July Daily Simulation (466K/day),Jul 4 end queue,110276,
+July Daily Simulation (466K/day),Jul 10 end queue,0,Fully cleared
+Scenario Comparison,Stress 326K/day peak queue,1173865,Jul 3
+Scenario Comparison,Stress 326K/day cleared by,Jul 10,
+Scenario Comparison,Low 414K/day peak queue,1085859,Jul 3
+Scenario Comparison,Low 414K/day cleared by,Jul 10,
+Scenario Comparison,Conservative 439K/day peak queue,1061498,Jul 3
+Scenario Comparison,Conservative 439K/day cleared by,Jul 10,
+Scenario Comparison,Base 466K/day peak queue,1034092,Jul 3
+Scenario Comparison,Base 466K/day cleared by,Jul 10,
+Planning Numbers,Budget capacity planning,2000000,Jul 1-10 window
+Planning Numbers,Peak concurrent queue to plan for,1030000,Monitor Jul 2-4
+Planning Numbers,Stakeholder commitment,Jul 10,Base case completion
+Planning Numbers,Conservative commitment with buffer,Jul 11-12,If rate drops to 326K/day
+Planning Numbers,Required avg rate over full July,205000,vs 466K proven capacity

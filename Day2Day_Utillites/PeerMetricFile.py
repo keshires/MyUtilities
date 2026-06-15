@@ -10,7 +10,7 @@ from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
 
 # Step 1: Read the CSV file
-file_path = 'C:\\GitHub\\Sample_PyPrj\\inputfiles\\edfx-24714_Landing_QA.csv'  # Replace with your CSV file path
+file_path = 'C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\edfx-24714_Landing_QA.csv'  # Replace with your CSV file path
 results_df = pd.read_csv(file_path)
 
 # Create a Spark session
@@ -30,7 +30,7 @@ df.write.mode('append') \
     .option("compression", "gzip") \
     .option("maxRecordsPerFile", 1000) \
     .partitionBy(['snapshot_datetime']) \
-    .csv("C:\\GitHub\\Sample_PyPrj\\inputfiles\\edfx-24714_Landing_QA_Output.csv")
+    .csv("C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\edfx-24714_Landing_QA_Output.csv")
 
 
 # Step 2: Add a new column

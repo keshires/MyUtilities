@@ -41,7 +41,7 @@ file uses ``--size`` as today).
 Example (single directory, two artifacts; relative ``--output-dir`` → ``output/opensearch_queries/``):
   python build_opensearch_entity_query_from_csv.py ^
     --tenant-id <your-tenant-id> ^
-    --csv "C:\\Github\\Sample_PyPrj\\BulkUplaodFiles\\your_file.csv" ^
+    --csv "C:\\Github\\MyUtilities\\Day2Day_Utillites\\BulkUplaodFiles\\your_file.csv" ^
     --output-dir my_export_run
 
 Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/opensearch_queries/``):

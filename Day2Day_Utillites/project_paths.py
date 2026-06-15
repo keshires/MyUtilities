@@ -1,4 +1,4 @@
-"""Central layout: logs under ``logs/``, generated files under ``output/<category>/``.
+"""Day2Day Utilities — central layout: logs under ``logs/``, generated files under ``output/<category>/``.
 
 Relative paths from CLI or from ``.env`` (when documented) resolve against the
 project root so runs are consistent regardless of current working directory.
