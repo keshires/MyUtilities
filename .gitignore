@@ -1,0 +1,3 @@
+# Git worktrees created for isolated development (never track their contents)
+.claude/worktrees/
+DocuProj/.claude/Stage1_InitialDesign/
