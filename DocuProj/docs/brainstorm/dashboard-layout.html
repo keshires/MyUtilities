@@ -1,0 +1,104 @@
+<h2>DocuProj Dashboard — how should endpoint → flow → step-detail work?</h2>
+<p class="subtitle">Same data (a real EDFX flow), two interaction models. Pick the one that fits how you'd actually use it. Click a card to select.</p>
+
+<style>
+  .wf { font-family: ui-sans-serif, system-ui; font-size: 12px; }
+  .wf .bar { background:#2d3748; color:#fff; padding:6px 10px; border-radius:6px 6px 0 0; font-weight:600; }
+  .wf .pane { border:1px solid #cbd5e0; }
+  .wf .list { padding:6px; }
+  .wf .li { padding:4px 6px; border-radius:4px; margin:2px 0; background:#f7fafc; border:1px solid #e2e8f0; }
+  .wf .li.sel { background:#bee3f8; border-color:#3182ce; font-weight:600; }
+  .wf .repo { color:#718096; font-size:10px; text-transform:uppercase; letter-spacing:.04em; margin:6px 0 2px; }
+  .wf .node { background:#fff; border:1.5px solid #4a5568; border-radius:6px; padding:5px 8px; text-align:center; }
+  .wf .node.hl { border-color:#dd6b20; background:#fffaf0; box-shadow:0 0 0 2px #fbd38d; }
+  .wf .arrow { text-align:center; color:#a0aec0; font-size:14px; line-height:1; }
+  .wf .detail { background:#f7fafc; border-top:2px solid #3182ce; padding:8px; }
+  .wf .code { font-family:ui-monospace,monospace; font-size:10px; background:#1a202c; color:#e2e8f0; padding:6px; border-radius:4px; margin-top:4px; white-space:pre; overflow:hidden; }
+  .wf .modal { position:relative; background:#fff; border:2px solid #3182ce; border-radius:8px; padding:8px; box-shadow:0 8px 24px rgba(0,0,0,.25); margin:6px; }
+  .wf .dim { background:rgba(45,55,72,.45); padding:10px; border-radius:6px; }
+  .wf .grid3 { display:grid; grid-template-columns: 1.1fr 1.4fr 1.3fr; gap:0; }
+  .wf .grid2 { display:grid; grid-template-columns: 1fr 1.6fr; gap:0; }
+</style>
+
+<div class="split">
+
+  <div class="card" data-choice="docked" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="wf">
+        <div class="bar">A · Docked 3-pane (detail panel slides in)</div>
+        <div class="grid3">
+          <div class="pane list">
+            <div class="repo">edfx-app-ui</div>
+            <div class="li">GET /portfolio/:id</div>
+            <div class="li sel">POST /entity/financials</div>
+            <div class="repo">edfx-api</div>
+            <div class="li">GET /reports/:id</div>
+          </div>
+          <div class="pane list" style="background:#fbfdff">
+            <div class="node hl">UI: FinancialsView.tsx</div>
+            <div class="arrow">↓</div>
+            <div class="node">edfx-api /v2/financials</div>
+            <div class="arrow">↓</div>
+            <div class="node">edfx_entity_api resolve()</div>
+            <div class="arrow">↓</div>
+            <div class="node">edfx-client-financials-api</div>
+          </div>
+          <div class="detail">
+            <strong>UI: FinancialsView.tsx</strong>
+            <div style="color:#718096;font-size:10px">Step 1 of 4 · click any node</div>
+            <div>Builds the request payload and calls the gateway.</div>
+            <div class="code">app-ui/src/views/
+ FinancialsView.tsx:142
+api.post('/entity/
+   financials', body)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A · Docked detail panel</h3>
+      <p>Detail stays open beside the flow. Click node after node and the right panel updates — easy to walk a whole chain without losing the diagram. Code refs always visible.</p>
+    </div>
+  </div>
+
+  <div class="card" data-choice="modal" onclick="toggleSelect(this)">
+    <div class="card-image">
+      <div class="wf">
+        <div class="bar">B · Master-detail + popup (your req 8 wording)</div>
+        <div class="grid2">
+          <div class="pane list">
+            <div class="repo">edfx-app-ui</div>
+            <div class="li">GET /portfolio/:id</div>
+            <div class="li sel">POST /entity/financials</div>
+            <div class="repo">edfx-api</div>
+            <div class="li">GET /reports/:id</div>
+          </div>
+          <div class="pane" style="position:relative">
+            <div class="dim">
+              <div class="node">UI: FinancialsView.tsx</div>
+              <div class="arrow" style="color:#cbd5e0">↓</div>
+              <div class="node hl">edfx-api /v2/financials</div>
+              <div class="arrow" style="color:#cbd5e0">↓</div>
+              <div class="node">edfx_entity_api resolve()</div>
+            </div>
+            <div class="modal">
+              <strong>edfx-api · /v2/financials</strong> ✕
+              <div>Gateway controller validates auth, fans out to entity + financials services.</div>
+              <div class="code">edfx-api/controllers/
+ Financials.java:88
+@PostMapping(
+  "/v2/financials")</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B · Click step → popup</h3>
+      <p>Flow takes the full canvas; clicking a step opens a focused modal with description + code lines, exactly as you wrote it. Dismiss to return to the diagram.</p>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:14px">Note: both render the <em>same</em> endpoint flow and the same code-reference popup content — the only difference is whether step detail is a <strong>docked panel</strong> or a <strong>modal popup</strong>. We can also support both (popup on a small screen, panel on wide). Tell me which feels right, or say "both".</p>

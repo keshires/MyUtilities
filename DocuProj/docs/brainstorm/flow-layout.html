@@ -1,0 +1,72 @@
+<h2>How should the flow graph be drawn?</h2>
+<p class="subtitle">Same endpoint (POST /entity/financials, crossing 4 repos). Three ways to render it. Your goal is "see integration between repos", so where service boundaries show up is the key difference. Click to select.</p>
+
+<style>
+  .fl { font-family: ui-sans-serif, system-ui; font-size:11px; }
+  .fl .node { background:#fff; border:1.5px solid #4a5568; border-radius:6px; padding:5px 7px; text-align:center; }
+  .fl .arrow { text-align:center; color:#a0aec0; }
+  .fl .lane { border:1px dashed #cbd5e0; border-radius:6px; padding:6px 4px; }
+  .fl .lanehdr { font-size:9px; text-transform:uppercase; letter-spacing:.04em; color:#fff; background:#4a5568; border-radius:4px; padding:2px 4px; text-align:center; margin-bottom:6px; }
+  .fl .ui { background:#ebf8ff; border-color:#3182ce; }
+  .fl .gw { background:#fffaf0; border-color:#dd6b20; }
+  .fl .svc { background:#f0fff4; border-color:#38a169; }
+  .fl .lifeline { width:2px; background:#cbd5e0; margin:0 auto; }
+  .fl .msg { font-size:9px; color:#4a5568; }
+</style>
+
+<div class="options">
+
+  <div class="option" data-choice="swimlane" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Cross-repo swimlanes &nbsp;<span style="font-weight:400;color:#718096">(recommended)</span></h3>
+      <p>One lane per repo/service. The request flows left→right and every time an arrow crosses a lane boundary, that's an integration point — exactly what you want to see. Hops between repos are visually obvious.</p>
+      <div class="fl" style="margin-top:8px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;align-items:start">
+          <div class="lane"><div class="lanehdr">edfx-app-ui</div><div class="node ui">FinancialsView<br>.tsx</div></div>
+          <div class="lane"><div class="lanehdr">edfx-api</div><div class="node gw">/v2/financials<br>controller</div></div>
+          <div class="lane"><div class="lanehdr">edfx_entity_api</div><div class="node svc">resolveEntity()</div></div>
+          <div class="lane"><div class="lanehdr">client-financials-api</div><div class="node svc">getFinancials()</div></div>
+        </div>
+        <div style="text-align:center;color:#dd6b20;margin-top:4px;font-size:10px">→ each lane crossing = an integration boundary ←</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="linear" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Linear call chain</h3>
+      <p>Simple top-to-bottom list of steps with the repo named on each node. Compact and easy to read for short flows, but cross-repo boundaries are just a label, not spatially obvious.</p>
+      <div class="fl" style="margin-top:8px;max-width:240px">
+        <div class="node ui">edfx-app-ui · FinancialsView.tsx</div>
+        <div class="arrow">↓</div>
+        <div class="node gw">edfx-api · /v2/financials</div>
+        <div class="arrow">↓</div>
+        <div class="node svc">edfx_entity_api · resolveEntity()</div>
+        <div class="arrow">↓</div>
+        <div class="node svc">client-financials-api · getFinancials()</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="sequence" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Sequence diagram (lifelines)</h3>
+      <p>UML-style: each repo is a vertical lifeline, messages are horizontal arrows with request/response. Great for request/response detail and timing, but denser to read at a glance. (We can still <em>generate</em> this as an export — req 3e — regardless of the in-dashboard choice.)</p>
+      <div class="fl" style="margin-top:8px">
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;text-align:center">
+          <div class="node ui">app-ui</div><div class="node gw">edfx-api</div><div class="node svc">entity-api</div><div class="node svc">fin-api</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:4px;height:60px">
+          <div class="lifeline"></div><div class="lifeline"></div><div class="lifeline"></div><div class="lifeline"></div>
+        </div>
+        <div class="msg">app-ui →→ edfx-api : POST /v2/financials &nbsp;|&nbsp; edfx-api →→ entity-api : resolve &nbsp;|&nbsp; entity-api ⇠ returns id</div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<p class="subtitle" style="margin-top:12px">My lean: <strong>A (swimlanes)</strong> in the dashboard because it makes repo integration boundaries the visual star, plus generate <strong>C (sequence)</strong> on demand as an export artifact. But pick what reads best to you.</p>
