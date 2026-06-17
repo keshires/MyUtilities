@@ -52,3 +52,30 @@ def test_flow_round_trips():
     assert dumped["endpointId"] == "ep1"
     assert dumped["nodes"][0]["codeRef"]["file"] == "App.tsx"
     assert Flow.model_validate(dumped) == flow
+
+
+from engine.models import AnalysisModel, Project, RepoRef
+
+
+def test_reporef_sha_optional_until_ingest():
+    repo = RepoRef(url="https://x/edfx-api", folder="edfx-api", branch="main")
+    assert repo.sha is None
+
+
+def test_analysis_model_round_trips():
+    ref = CodeRef(repo="edfx-api", file="a.ts", line=1, snippet="x")
+    ep = Endpoint(id="ep1", repo="edfx-api", method="GET", path="/x", handler_ref=ref, language="typescript")
+    flow = Flow(endpoint_id="ep1", nodes=[], edges=[])
+    project = Project(
+        id="edfx-flow",
+        name="EDFX Flow",
+        repos=[RepoRef(url="https://x/edfx-api", folder="edfx-api", branch="main", sha="abc123")],
+    )
+    model = AnalysisModel(project=project, endpoints=[ep], flows=[flow])
+    assert AnalysisModel.model_validate_json(model.model_dump_json(by_alias=True)) == model
+
+
+def test_public_exports():
+    import engine
+
+    assert hasattr(engine, "AnalysisModel")

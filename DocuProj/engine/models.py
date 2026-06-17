@@ -51,3 +51,22 @@ class Flow(_Model):
     endpoint_id: str = Field(alias="endpointId")
     nodes: list[FlowNode]
     edges: list[FlowEdge]
+
+
+class RepoRef(_Model):
+    url: str
+    folder: str
+    branch: str
+    sha: str | None = None
+
+
+class Project(_Model):
+    id: str
+    name: str
+    repos: list[RepoRef]
+
+
+class AnalysisModel(_Model):
+    project: Project
+    endpoints: list[Endpoint]
+    flows: list[Flow]
