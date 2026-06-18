@@ -25,3 +25,33 @@ def test_cache_key_independent_of_repo_order():
 
 def test_cache_key_changes_with_sha():
     assert cache_key(_project()) != cache_key(_project(sha_a="zzz"))
+
+
+from engine.cache import Cache
+from engine.models import AnalysisModel
+
+
+def _model():
+    return AnalysisModel(project=_project(), endpoints=[], flows=[])
+
+
+def test_cache_miss_returns_none(tmp_path):
+    cache = Cache(tmp_path)
+    assert cache.get("does-not-exist") is None
+
+
+def test_cache_put_then_get_round_trips(tmp_path):
+    cache = Cache(tmp_path)
+    model = _model()
+    key = cache_key(model.project)
+    cache.put(key, model)
+    assert cache.get(key) == model
+
+
+def test_cache_writes_camelcase_json(tmp_path):
+    cache = Cache(tmp_path)
+    model = _model()
+    key = cache_key(model.project)
+    cache.put(key, model)
+    text = (tmp_path / f"{key}.json").read_text(encoding="utf-8")
+    assert '"project"' in text
