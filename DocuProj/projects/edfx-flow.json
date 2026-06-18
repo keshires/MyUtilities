@@ -1,0 +1,11 @@
+{
+  "project": "edfx-flow",
+  "repos": [
+    {"url": "https://github.com/moodysanalytics/edfx-app-ui", "folder": "edfx-app-ui", "branch": "main"},
+    {"url": "https://github.com/moodysanalytics/edfx-api", "folder": "edfx-api", "branch": "main"},
+    {"url": "https://github.com/moodysanalytics/edfx_entity_api", "folder": "edfx_entity_api", "branch": "main"},
+    {"url": "https://github.com/moodysanalytics/edfx-client-financials-api", "folder": "edfx-client-financials-api", "branch": "main"},
+    {"url": "https://github.com/moodysanalytics/edfx-tessera-service", "folder": "edfx-tessera-service", "branch": "main"},
+    {"url": "https://github.com/moodysanalytics/edfx-report-builder", "folder": "edfx-report-builder", "branch": "main"}
+  ]
+}
