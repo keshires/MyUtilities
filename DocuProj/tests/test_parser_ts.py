@@ -23,3 +23,14 @@ def test_extract_outbound_calls():
     assert "entities" in get_call.target
     assert get_call.code_ref.file == "entity.service.ts"
     assert get_call.code_ref.line >= 1
+
+
+from engine.parsers import parse
+
+
+def test_parse_dispatches_typescript():
+    facts = parse(_FIX, "angular", repo="edfx-app-ui")
+    assert facts.language == "typescript"
+    assert len(facts.outbound_calls) == 2
+    assert len(facts.config_urls) == 3
+    assert facts.endpoints == []

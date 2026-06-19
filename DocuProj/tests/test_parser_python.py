@@ -31,3 +31,14 @@ def test_extract_fastapi_routes():
     assert ep.handler_ref.file == "sample_router.py"
     assert ep.handler_ref.line >= 1
     assert "get_entity" in ep.handler_ref.snippet
+
+
+from engine.parsers import parse
+
+
+def test_parse_dispatches_python():
+    facts = parse(_FIX, "python", repo="edfx-api")
+    assert facts.language == "python"
+    assert facts.repo == "edfx-api"
+    assert len(facts.endpoints) == 3
+    assert facts.outbound_calls == []
