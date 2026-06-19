@@ -22,8 +22,8 @@ The headline value is **making cross-repository integration boundaries visible**
 The first real target is the EDFX service fleet:
 
 ```
-https://github.com/moodysanalytics/edfx-app-ui            (React/TS front-end)
-https://github.com/moodysanalytics/edfx-api               (gateway API)
+https://github.com/moodysanalytics/edfx-app-ui            (Angular/TS front-end)
+https://github.com/moodysanalytics/edfx-api               (gateway API — Python/FastAPI)
 https://github.com/moodysanalytics/edfx_entity_api        (entity service)
 https://github.com/moodysanalytics/edfx-client-financials-api  (financials service)
 https://github.com/moodysanalytics/edfx-tessera-service   (service)
@@ -248,3 +248,19 @@ DocuProj/
 - Editing or modifying the analyzed repos.
 - Authn/multi-user dashboard hosting (local single-user tool for now).
 - Exhaustive language support beyond what the target flows require.
+
+---
+
+## 12. Real-stack validation (verified 2026-06 against the live repos)
+
+Shallow clones of the actual EDFX repos corrected several assumptions in §1–§2:
+
+| Item | Spec assumption | **Reality** | Impact |
+|------|-----------------|-------------|--------|
+| `edfx-app-ui` framework | React/TS | **Angular / TypeScript** (`angular.json`, transloco, karma) | Outbound extractor targets Angular `HttpClient`, not React fetch/axios |
+| `edfx-api` language | unspecified gateway | **Python / FastAPI** (`main.py`, `APIRouter`, alembic) | Inbound-route extractor is Python/FastAPI, not TS |
+| `edfx-api` default branch | `main` | **`master`** | `projects/edfx-flow.json` corrected; the other 5 repos are `main` |
+| Inbound route shape | `@router.get(...)` | **Per-feature vars**: `x_router = APIRouter(prefix="/auditTrail")` + `@x_router.post("")`; handler is the `def` below | Extractor discovers `APIRouter` assignments + `prefix`, then matches `@<var>.<verb>`; full path = prefix + decorator arg |
+| Outbound URL shape | literal path at call site | **Indirected**: central `ApiService` wraps `this.http.<verb>(url, …)`; real base URLs live in `environment.endPointConfig` (key → service base URL, e.g. `edfxApiV2Url: …/edfx/v2`) and callers compose `base + '/path'` | Confirms the §10 templated-URL risk. Extractor deterministically captures the `endPointConfig` map + `this.http.<verb>` call sites; variable→config→URL resolution is Linker + Claude work (§3, Plan 4) |
+
+**Net:** the Phase-1 MVP first hop is **Angular/TS → Python/FastAPI**, so the Parser plan (Plan 3) builds *two* extractors (TS-outbound + Python-routes). Cross-repo URL resolution remains the core risk and is deferred to the hybrid Linker.
