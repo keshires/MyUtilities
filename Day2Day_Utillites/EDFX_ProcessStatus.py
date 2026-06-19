@@ -2,9 +2,9 @@
 EDFX Process Status Checker (Optimized Version v2)
 This script:
 1. Authenticates with Moody's SSO to get an access token
-2. Reads process IDs from each CSV or Excel file in a configured input folder
+2. Loads distinct process IDs from Postgres (entity_custom_data)
 3. Calls the EDFX status API for each process ID (with parallel processing)
-4. Saves the results to a NEW file in an output folder (original file is NOT modified)
+4. Saves the results to a new Excel file in a configured output folder
 
 Optimizations v2:
 - Parallel API calls using ThreadPoolExecutor
@@ -16,6 +16,7 @@ Optimizations v2:
 - Option to limit error type sheets
 """
 
+import asyncio
 import os
 import sys
 import time
@@ -24,12 +25,13 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 
+import asyncpg
 import pandas as pd
 import requests
 import urllib3
 from dotenv import load_dotenv
 
-from project_paths import resolve_project_relative
+from project_paths import output_dir, resolve_project_relative
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
@@ -53,13 +55,30 @@ EDFX_BASE_URL = os.getenv(
     "https://api.edfx.moodysanalytics.com/edfx/v1/processes",
 ).strip()
 
-_edfx_in = (os.getenv("EDFX_INPUT_FOLDER") or "").strip()
 _edfx_out = (os.getenv("EDFX_OUTPUT_FOLDER") or "").strip()
-INPUT_FOLDER = resolve_project_relative(_edfx_in) if _edfx_in else ""
-OUTPUT_FOLDER = resolve_project_relative(_edfx_out) if _edfx_out else ""
+OUTPUT_FOLDER = (
+    resolve_project_relative(_edfx_out)
+    if _edfx_out
+    else str(output_dir("edfx_process_status"))
+)
+
+DEFAULT_PROCESS_QUERY = """
+SELECT DISTINCT financials_process_id, financials_process_status
+FROM entity_custom_data
+WHERE financials_process_status <> 'Completed'
+""".strip()
+EDFX_PROCESS_QUERY = (os.getenv("EDFX_PROCESS_QUERY") or DEFAULT_PROCESS_QUERY).strip()
+
+POSTGRES_ENV_KEYS = (
+    "TESSERA_POSTGRES_HOST",
+    "TESSERA_POSTGRES_DB",
+    "TESSERA_POSTGRES_USER",
+    "TESSERA_POSTGRES_PASSWORD",
+)
 
 # Column names
 PROCESS_ID_COLUMN = "financials_process_id"
+PROCESS_STATUS_COLUMN = "financials_process_status"
 RESULT_COLUMNS = {
     "status_message": "Status Endpoint Error Message",
     "status_value": "API_Status",
@@ -99,7 +118,7 @@ MANUAL_TOKEN = (os.getenv("EDFX_MANUAL_TOKEN") or "").strip() or None
 def get_sso_token():
     """Authenticate with Moody's SSO and retrieve an access token."""
     print(f"\n{'='*60}")
-    print("STEP 1: Authenticating with SSO...")
+    print("Authenticating with SSO...")
     print(f"{'='*60}")
 
     if not SSO_USERNAME or not SSO_PASSWORD:
@@ -293,70 +312,71 @@ def parse_result_inline(result, process_id, tenant_id):
     return parsed, entity_errors
 
 
-def discover_input_files(folder_path):
-    """Return sorted paths to .csv and .xlsx files in folder_path."""
-    if not os.path.isdir(folder_path):
-        print(f"✗ Input folder not found: {folder_path}")
-        return []
-    paths = []
-    for name in sorted(os.listdir(folder_path)):
-        lower = name.lower()
-        if lower.endswith(".csv") or lower.endswith(".xlsx"):
-            paths.append(os.path.join(folder_path, name))
-    return paths
+def missing_postgres_env() -> list[str]:
+    return [key for key in POSTGRES_ENV_KEYS if not (os.getenv(key) or "").strip()]
 
 
-def load_input_dataframe(input_path):
-    """Load a CSV or Excel file into a DataFrame."""
-    ext = os.path.splitext(input_path)[1].lower()
-    if ext == ".csv":
-        return pd.read_csv(input_path)
-    if ext == ".xlsx":
-        return pd.read_excel(input_path, engine="openpyxl")
-    raise ValueError(f"Unsupported input type: {input_path}")
+async def _fetch_process_rows() -> list[asyncpg.Record]:
+    conn = await asyncpg.connect(
+        host=os.environ["TESSERA_POSTGRES_HOST"],
+        port=int(os.getenv("TESSERA_POSTGRES_PORT", "5432")),
+        database=os.environ["TESSERA_POSTGRES_DB"],
+        user=os.environ["TESSERA_POSTGRES_USER"],
+        password=os.environ["TESSERA_POSTGRES_PASSWORD"],
+        ssl="prefer",
+    )
+    try:
+        return await conn.fetch(EDFX_PROCESS_QUERY)
+    finally:
+        await conn.close()
 
 
-def setup_output_folder(input_file_path):
-    """Create output folder and return output Excel path for this input file."""
+def load_process_dataframe() -> pd.DataFrame:
+    """Load distinct process IDs and DB status from Postgres."""
+    rows = asyncio.run(_fetch_process_rows())
+    if not rows:
+        return pd.DataFrame(columns=[PROCESS_ID_COLUMN, PROCESS_STATUS_COLUMN])
+
+    df = pd.DataFrame([dict(row) for row in rows])
+    if PROCESS_ID_COLUMN not in df.columns:
+        raise ValueError(
+            f"Query must return '{PROCESS_ID_COLUMN}'. Got columns: {list(df.columns)}"
+        )
+    return df
+
+
+def setup_output_file(base_name="EDFX_ProcessStatus"):
+    """Create output folder and return output Excel path."""
     os.makedirs(OUTPUT_FOLDER, exist_ok=True)
     print(f"✓ Output folder ready: {OUTPUT_FOLDER}")
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    base = os.path.splitext(os.path.basename(input_file_path))[0]
-    filename = f"{base}_StatusResults_{timestamp}.xlsx"
+    filename = f"{base_name}_StatusResults_{timestamp}.xlsx"
     return os.path.join(OUTPUT_FOLDER, filename)
 
 
-def process_one_input_file(access_token, input_file_path):
-    """Main processing for a single CSV or Excel input; writes one .xlsx result."""
+def process_status_data(access_token, df):
+    """Fetch EDFX status for each DB process ID and write one .xlsx result."""
     print(f"\n{'='*60}")
     print("STEP 2: Setting Up Output...")
     print(f"{'='*60}")
 
-    output_file_path = setup_output_folder(input_file_path)
+    output_file_path = setup_output_file()
     print(f"  Output file: {output_file_path}")
 
     print(f"\n{'='*60}")
-    print("STEP 3: Reading Input File...")
+    print("STEP 3: Loaded Process IDs from Database")
     print(f"{'='*60}")
-    print(f"  Input: {input_file_path}")
+    print(f"  Rows: {len(df)}")
 
-    try:
-        df = load_input_dataframe(input_file_path)
-        print(f"✓ Loaded {len(df)} rows")
-
-        if PROCESS_ID_COLUMN not in df.columns:
-            print(f"✗ Column '{PROCESS_ID_COLUMN}' not found!")
-            return False
-
-        # Add all result columns at once
-        for col in RESULT_COLUMNS.values():
-            if col not in df.columns:
-                df[col] = ""
-
-    except Exception as e:
-        print(f"✗ Error reading Excel: {e}")
+    if PROCESS_ID_COLUMN not in df.columns:
+        print(f"✗ Column '{PROCESS_ID_COLUMN}' not found!")
         return False
+
+    # Add all result columns at once (entity_error_count is numeric)
+    for key, col in RESULT_COLUMNS.items():
+        if col not in df.columns:
+            df[col] = 0 if key == "entity_error_count" else ""
 
     print(f"\n{'='*60}")
     print("STEP 4: Processing Process IDs (Parallel)...")
@@ -436,9 +456,16 @@ def process_one_input_file(access_token, input_file_path):
     print(f"  Updating DataFrame (batch mode)...")
 
     for key, col_name in RESULT_COLUMNS.items():
-        values = {idx: parsed.get(key, "") for idx, parsed in results_data.items()}
+        default = 0 if key == "entity_error_count" else ""
+        values = {idx: parsed.get(key, default) for idx, parsed in results_data.items()}
         if values:
-            df.loc[list(values.keys()), col_name] = list(values.values())
+            assign_values = list(values.values())
+            if key != "entity_error_count":
+                assign_values = [
+                    "" if v is None or (isinstance(v, float) and pd.isna(v)) else str(v)
+                    for v in assign_values
+                ]
+            df.loc[list(values.keys()), col_name] = assign_values
 
     # Mark skipped rows
     skipped_indices = [idx for idx in range(rows_to_process) if idx not in results_data]
@@ -565,21 +592,31 @@ def main():
     print(f"Started: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 60)
 
-    if not INPUT_FOLDER or not OUTPUT_FOLDER:
+    missing = missing_postgres_env()
+    if missing:
         print(
-            "\n✗ Set EDFX_INPUT_FOLDER and EDFX_OUTPUT_FOLDER in .env "
-            "(see .env.example)."
+            "\n✗ Set Postgres settings in .env: "
+            + ", ".join(missing)
+            + " (see .env.example)."
         )
         return
 
-    input_files = discover_input_files(INPUT_FOLDER)
-    if not input_files:
-        print(f"\n✗ No CSV or Excel files found in:\n  {INPUT_FOLDER}")
+    print(f"\n{'='*60}")
+    print("STEP 1: Loading Process IDs from Database...")
+    print(f"{'='*60}")
+    print(f"  Query:\n  {EDFX_PROCESS_QUERY}")
+
+    try:
+        df = load_process_dataframe()
+    except Exception as e:
+        print(f"\n✗ Database query failed: {e}")
         return
 
-    print(f"\n✓ Found {len(input_files)} input file(s) in:\n  {INPUT_FOLDER}")
-    for p in input_files:
-        print(f"    - {os.path.basename(p)}")
+    if df.empty:
+        print("\n✗ No process IDs returned from database.")
+        return
+
+    print(f"✓ Loaded {len(df)} distinct process ID(s)")
 
     access_token = MANUAL_TOKEN or get_sso_token()
 
@@ -587,13 +624,7 @@ def main():
         print("\n✗ No access token. Exiting.")
         return
 
-    all_ok = True
-    for input_path in input_files:
-        print(f"\n{'#'*60}")
-        print(f"# Processing: {os.path.basename(input_path)}")
-        print(f"{'#'*60}")
-        if not process_one_input_file(access_token, input_path):
-            all_ok = False
+    all_ok = process_status_data(access_token, df)
 
     print("\n" + "=" * 60)
     print("✓ COMPLETED!" if all_ok else "✗ COMPLETED WITH ERRORS")
