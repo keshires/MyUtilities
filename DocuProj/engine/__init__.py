@@ -10,6 +10,7 @@ from engine.models import (
     Project,
     RepoRef,
 )
+from engine.ingest import ResolvedRepo, ingest, load_project
 
 __all__ = [
     "AnalysisModel",
@@ -20,4 +21,7 @@ __all__ = [
     "FlowNode",
     "Project",
     "RepoRef",
+    "ResolvedRepo",
+    "ingest",
+    "load_project",
 ]

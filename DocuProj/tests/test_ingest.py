@@ -64,3 +64,57 @@ def test_clone_or_update_clones_fresh(tmp_path):
     clone_or_update(str(up), dest, "main")
     assert (dest / ".git").exists()
     assert head_sha(dest) == sha
+
+
+from engine.ingest import ResolvedRepo, ingest
+from engine.models import Project, RepoRef
+
+
+def test_clone_or_update_fetches_latest(tmp_path):
+    up = tmp_path / "up"
+    _make_upstream(up, "v1")
+    dest = tmp_path / "ws" / "r"
+    clone_or_update(str(up), dest, "main")
+    # advance upstream
+    (up / "README.md").write_text("v2", encoding="utf-8")
+    _git(["add", "."], up)
+    _git(["commit", "-m", "v2"], up)
+    new_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(up), capture_output=True, text=True
+    ).stdout.strip()
+    clone_or_update(str(up), dest, "main")
+    assert head_sha(dest) == new_sha
+
+
+def test_ingest_resolves_repos(tmp_path):
+    up = tmp_path / "up"
+    sha = _make_upstream(up)
+    project = Project(id="proj", name="proj", repos=[RepoRef(url=str(up), folder="r", branch="main")])
+    ws = tmp_path / "workspace"
+    resolved = ingest(project, ws)
+    assert len(resolved) == 1
+    r = resolved[0]
+    assert isinstance(r, ResolvedRepo)
+    assert r.folder == "r"
+    assert r.branch == "main"
+    assert r.sha == sha
+    assert Path(r.path) == ws / "proj" / "r"
+    assert (Path(r.path) / ".git").exists()
+
+
+def test_ingest_applies_branch_override(tmp_path):
+    up = tmp_path / "up"
+    _make_upstream(up)
+    _git(["checkout", "-b", "feature"], up)
+    (up / "f.txt").write_text("x", encoding="utf-8")
+    _git(["add", "."], up)
+    _git(["commit", "-m", "feat"], up)
+    feat_sha = subprocess.run(
+        ["git", "rev-parse", "HEAD"], cwd=str(up), capture_output=True, text=True
+    ).stdout.strip()
+    _git(["checkout", "main"], up)
+    project = Project(id="proj", name="proj", repos=[RepoRef(url=str(up), folder="r", branch="main")])
+    ws = tmp_path / "workspace"
+    resolved = ingest(project, ws, branch_overrides={"r": "feature"})
+    assert resolved[0].branch == "feature"
+    assert resolved[0].sha == feat_sha

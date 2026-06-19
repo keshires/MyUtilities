@@ -6,7 +6,19 @@ import json
 import subprocess
 from pathlib import Path
 
+from pydantic import BaseModel
+
 from engine.models import Project, RepoRef
+
+
+class ResolvedRepo(BaseModel):
+    """One repo resolved to a local checkout at a pinned SHA."""
+
+    url: str
+    folder: str
+    branch: str
+    sha: str
+    path: str
 
 
 def load_project(path: str | Path) -> Project:
@@ -41,3 +53,27 @@ def clone_or_update(url: str, dest: str | Path, branch: str) -> None:
     else:
         dest.parent.mkdir(parents=True, exist_ok=True)
         run_git(["clone", "--branch", branch, url, str(dest)])
+
+
+def ingest(
+    project: Project,
+    workspace_root: str | Path,
+    branch_overrides: dict[str, str] | None = None,
+) -> list[ResolvedRepo]:
+    overrides = branch_overrides or {}
+    workspace_root = Path(workspace_root)
+    resolved: list[ResolvedRepo] = []
+    for repo in project.repos:
+        branch = overrides.get(repo.folder, repo.branch)
+        dest = workspace_root / project.id / repo.folder
+        clone_or_update(repo.url, dest, branch)
+        resolved.append(
+            ResolvedRepo(
+                url=repo.url,
+                folder=repo.folder,
+                branch=branch,
+                sha=head_sha(dest),
+                path=str(dest),
+            )
+        )
+    return resolved
