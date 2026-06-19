@@ -13,3 +13,13 @@ def test_extract_config_urls():
     cfg = next(c for c in configs if c.key == "edfxApiV2Url")
     assert cfg.code_ref.file == "environment.dev.ts"
     assert cfg.code_ref.line >= 1
+
+
+def test_extract_outbound_calls():
+    outbound, _configs = extract_angular_outbound(_FIX, repo="edfx-app-ui")
+    methods = sorted(c.method for c in outbound)
+    assert methods == ["GET", "POST"]
+    get_call = next(c for c in outbound if c.method == "GET")
+    assert "entities" in get_call.target
+    assert get_call.code_ref.file == "entity.service.ts"
+    assert get_call.code_ref.line >= 1

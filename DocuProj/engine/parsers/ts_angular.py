@@ -40,6 +40,39 @@ def _config_urls(root, repo, rel, lines) -> list[ConfigUrl]:
     return out
 
 
+def _outbound_calls(root, repo, rel, lines) -> list[OutboundCall]:
+    out: list[OutboundCall] = []
+    for node in walk(root):
+        if node.type != "call_expression":
+            continue
+        fn = node.child_by_field_name("function")
+        if fn is None or fn.type != "member_expression":
+            continue
+        obj = fn.child_by_field_name("object")
+        prop = fn.child_by_field_name("property")
+        if obj is None or prop is None:
+            continue
+        verb = text(prop)
+        if verb not in _VERBS or "http" not in text(obj).lower():
+            continue
+        target = ""
+        args = node.child_by_field_name("arguments")
+        if args is not None:
+            reals = [c for c in args.children if c.type not in ("(", ")", ",")]
+            if reals:
+                target = text(reals[0])
+        row = node.start_point[0]
+        snippet = lines[row].strip() if row < len(lines) else ""
+        out.append(
+            OutboundCall(
+                method=verb.upper(),
+                target=target,
+                code_ref=CodeRef(repo=repo, file=rel, line=row + 1, snippet=snippet),
+            )
+        )
+    return out
+
+
 def extract_angular_outbound(repo_path, repo: str):
     repo_root = Path(repo_path)
     parser = ts_parser()
@@ -52,5 +85,6 @@ def extract_angular_outbound(repo_path, repo: str):
         root = parser.parse(source.encode("utf-8")).root_node
         rel = ts.relative_to(repo_root).as_posix()
         lines = source.splitlines()
+        outbound.extend(_outbound_calls(root, repo, rel, lines))
         configs.extend(_config_urls(root, repo, rel, lines))
     return outbound, configs
