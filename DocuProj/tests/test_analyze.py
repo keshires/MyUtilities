@@ -42,12 +42,16 @@ def _project():
 
 
 def _fake_ingest(monkeypatch):
+    import sys
+
     def fake(project, workspace, branch_overrides=None):
         return [
             ResolvedRepo(url="u-ui", folder="ui", branch="main", sha="uiSHA", path=str(_FIX / "ui")),
             ResolvedRepo(url="u-api", folder="api", branch="master", sha="apiSHA", path=str(_FIX / "api")),
         ]
-    monkeypatch.setattr("engine.analyze.ingest", fake)
+    # Patch the module object (engine.analyze's `analyze` function shadows the
+    # submodule as a package attribute, so the dotted-string form misresolves).
+    monkeypatch.setattr(sys.modules["engine.analyze"], "ingest", fake)
 
 
 def test_analyze_builds_and_caches_model(tmp_path, monkeypatch):

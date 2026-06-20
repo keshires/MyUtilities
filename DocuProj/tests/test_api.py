@@ -66,3 +66,35 @@ def test_missing_flow_returns_404(tmp_path):
     client = _client(tmp_path)
     resp = client.get("/projects/edfx-flow/flow", params={"endpoint_id": "nope"})
     assert resp.status_code == 404
+
+
+import json
+
+
+def test_list_projects(tmp_path):
+    (tmp_path / "edfx-flow.json").write_text(
+        json.dumps({"project": "edfx-flow", "repos": [{"url": "u", "folder": "edfx-api", "branch": "master"}]}),
+        encoding="utf-8",
+    )
+    app = create_app(projects_dir=tmp_path, workspace=tmp_path / "ws", store={})
+    client = TestClient(app)
+    resp = client.get("/projects")
+    assert resp.status_code == 200
+    assert resp.json()[0]["id"] == "edfx-flow"
+
+
+def test_run_invokes_analyze_and_stores(tmp_path, monkeypatch):
+    (tmp_path / "edfx-flow.json").write_text(
+        json.dumps({"project": "edfx-flow", "repos": [{"url": "u", "folder": "edfx-api", "branch": "master"}]}),
+        encoding="utf-8",
+    )
+    store: dict = {}
+    monkeypatch.setattr("engine.api.analyze", lambda project, workspace: _model())
+    app = create_app(projects_dir=tmp_path, workspace=tmp_path / "ws", store=store)
+    client = TestClient(app)
+    resp = client.post("/projects/edfx-flow/run")
+    assert resp.status_code == 200
+    assert resp.json() == {"endpoints": 1, "flows": 1}
+    assert "edfx-flow" in store
+    # now readable
+    assert client.get("/projects/edfx-flow/endpoints").status_code == 200
