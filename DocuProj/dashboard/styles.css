@@ -1,0 +1,28 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, sans-serif; color: #1c2330; }
+header { display: flex; gap: 12px; align-items: baseline; padding: 12px 18px; background: #0f1b2d; color: #fff; }
+header h1 { font-size: 18px; margin: 0; }
+#project-name { color: #9db4d4; }
+main { display: flex; height: calc(100vh - 53px); }
+aside { width: 320px; border-right: 1px solid #dde3ec; display: flex; flex-direction: column; }
+#filter { margin: 10px; padding: 7px 9px; border: 1px solid #cbd4e1; border-radius: 6px; }
+#endpoint-list { list-style: none; margin: 0; padding: 0; overflow-y: auto; }
+#endpoint-list li { padding: 8px 12px; border-bottom: 1px solid #eef1f6; cursor: pointer; font-family: ui-monospace, monospace; font-size: 12.5px; }
+#endpoint-list li:hover { background: #eef4ff; }
+#endpoint-list li.active { background: #dce9ff; }
+#flow-panel { flex: 1; overflow: auto; padding: 16px; }
+#flow-title { font-weight: 600; margin-bottom: 14px; }
+.lane { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px dashed #d6deea; }
+.lane-label { width: 150px; font-weight: 600; color: #335; font-size: 12px; }
+.lane-nodes { display: flex; gap: 28px; flex-wrap: wrap; }
+.node { padding: 8px 12px; border: 1.5px solid #4577c4; border-radius: 8px; background: #fff; cursor: pointer; font-size: 12.5px; }
+.node.kind-ui { border-color: #6b46c1; background: #f6f2ff; }
+.node.kind-route { border-color: #2f855a; background: #f0fff6; }
+.node:hover { box-shadow: 0 1px 6px rgba(0,0,0,.15); }
+.edge-note { color: #7a869a; font-size: 11px; margin: 2px 0 0 160px; }
+.hidden { display: none; }
+#popup { position: fixed; inset: 0; background: rgba(10,18,30,.45); display: flex; align-items: center; justify-content: center; }
+#popup-card { background: #fff; border-radius: 10px; padding: 18px 20px; max-width: 680px; width: 90%; position: relative; }
+#popup-close { position: absolute; top: 8px; right: 12px; border: none; background: none; font-size: 22px; cursor: pointer; }
+#popup-ref { font-family: ui-monospace, monospace; color: #2f855a; margin-bottom: 8px; }
+#popup-snippet { background: #0f1b2d; color: #e6edf3; padding: 12px; border-radius: 8px; overflow-x: auto; white-space: pre-wrap; }
