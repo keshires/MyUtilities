@@ -5,6 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
+from fastapi.responses import RedirectResponse
+from fastapi.staticfiles import StaticFiles
 
 from engine.analyze import analyze
 from engine.ingest import load_project
@@ -50,5 +52,12 @@ def create_app(projects_dir, workspace, store: dict[str, AnalysisModel] | None =
                 if node.id == node_id:
                     return node.model_dump(by_alias=True)
         raise HTTPException(status_code=404, detail="flow node not found")
+
+    @app.get("/")
+    def _root():
+        return RedirectResponse(url="/app/")
+
+    dashboard_dir = Path(__file__).resolve().parent.parent / "dashboard"
+    app.mount("/app", StaticFiles(directory=dashboard_dir, html=True), name="dashboard")
 
     return app

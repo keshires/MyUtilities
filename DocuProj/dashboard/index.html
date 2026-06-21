@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>DocuProj — Cross-repo flows</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <header>
+    <h1>DocuProj</h1>
+    <span id="project-name"></span>
+  </header>
+  <main>
+    <aside>
+      <input id="filter" placeholder="Filter endpoints…" />
+      <ul id="endpoint-list"></ul>
+    </aside>
+    <section id="flow-panel">
+      <div id="flow-title">Select an endpoint to see its cross-repo flow</div>
+      <div id="flow-canvas"></div>
+    </section>
+  </main>
+  <div id="popup" class="hidden">
+    <div id="popup-card">
+      <button id="popup-close">×</button>
+      <h2 id="popup-title"></h2>
+      <div id="popup-ref"></div>
+      <pre id="popup-snippet"></pre>
+    </div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>
