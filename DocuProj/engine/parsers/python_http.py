@@ -6,16 +6,19 @@ from pathlib import Path
 
 from engine.facts import OutboundCall
 from engine.models import CodeRef
+from engine.parsers._consts import build_const_map, resolve_expr
 from engine.parsers._support import python_parser, text, walk
 
 _VERBS = {"get", "post", "put", "delete", "patch"}
 _CLIENT_HINTS = ("requests", "httpx", "aiohttp", "session", "client", "http")
 
 
-def extract_python_outbound(repo_path, repo: str) -> list[OutboundCall]:
+def extract_python_outbound(repo_path, repo: str, consts: dict | None = None) -> list[OutboundCall]:
     parser = python_parser()
     out: list[OutboundCall] = []
     repo_root = Path(repo_path)
+    if consts is None:
+        consts = build_const_map(repo_root)
     for py in sorted(repo_root.rglob("*.py")):
         source = py.read_bytes()
         root = parser.parse(source).root_node
@@ -39,7 +42,8 @@ def extract_python_outbound(repo_path, repo: str) -> list[OutboundCall]:
             if args is not None:
                 reals = [c for c in args.children if c.type not in ("(", ")", ",")]
                 if reals:
-                    target = text(reals[0])
+                    # Prefer a constant-resolved path; fall back to the raw expression text.
+                    target = resolve_expr(reals[0], consts) or text(reals[0])
             row = node.start_point[0]
             snippet = lines[row].strip() if row < len(lines) else ""
             out.append(

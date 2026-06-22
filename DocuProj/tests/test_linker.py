@@ -134,3 +134,7 @@ def test_link_connects_outbound_to_downstream_route():
     assert flow.edges[0].kind == "http"
     # gateway's own /edfx/v2/x has no inbound source -> no flow
     assert not any(f.endpoint_id == "edfx-api:GET:/edfx/v2/x" for f in model.flows)
+
+
+def test_target_path_accepts_bare_resolved_path():
+    assert target_path("/entity/v1/resolve") == "/entity/v1/resolve"

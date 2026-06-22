@@ -78,10 +78,11 @@ def _function_definition(decorated):
     return None
 
 
-def extract_fastapi_routes(repo_path, repo: str) -> list[Endpoint]:
+def extract_fastapi_routes(repo_path, repo: str, consts: dict | None = None) -> list[Endpoint]:
     repo_root = Path(repo_path)
     parser = python_parser()
-    consts = build_const_map(repo_root)
+    if consts is None:
+        consts = build_const_map(repo_root)
     endpoints: list[Endpoint] = []
     for py in sorted(repo_root.rglob("*.py")):
         source = py.read_bytes()

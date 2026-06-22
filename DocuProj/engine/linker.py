@@ -24,9 +24,13 @@ _PATH_LITERAL = re.compile(r"""['"`](/[^'"`]*)['"`]""")
 
 
 def target_path(target: str) -> str:
-    """Extract a literal path fragment from an outbound target expression, else ''."""
+    """Extract a path from an outbound target: a quoted '/…' literal, or a bare resolved '/…'."""
     m = _PATH_LITERAL.search(target)
-    return m.group(1) if m else ""
+    if m:
+        return m.group(1)
+    if target.startswith("/"):
+        return target  # already a resolved bare path
+    return ""
 
 
 class LinkQuery(BaseModel):
