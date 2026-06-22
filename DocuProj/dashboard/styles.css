@@ -12,14 +12,22 @@ aside { width: 320px; border-right: 1px solid #dde3ec; display: flex; flex-direc
 #endpoint-list li.active { background: #dce9ff; }
 #flow-panel { flex: 1; overflow: auto; padding: 16px; }
 #flow-title { font-weight: 600; margin-bottom: 14px; }
-.lane { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px dashed #d6deea; }
-.lane-label { width: 150px; font-weight: 600; color: #335; font-size: 12px; }
-.lane-nodes { display: flex; gap: 28px; flex-wrap: wrap; }
-.node { padding: 8px 12px; border: 1.5px solid #4577c4; border-radius: 8px; background: #fff; cursor: pointer; font-size: 12.5px; }
-.node.kind-ui { border-color: #6b46c1; background: #f6f2ff; }
-.node.kind-route { border-color: #2f855a; background: #f0fff6; }
-.node:hover { box-shadow: 0 1px 6px rgba(0,0,0,.15); }
-.edge-note { color: #7a869a; font-size: 11px; margin: 2px 0 0 160px; }
+#flow-canvas { position: relative; overflow: auto; }
+.empty { color: #7a869a; }
+
+/* Cross-repo swimlanes: one column per repo, request flows left -> right */
+.lanes { display: flex; gap: 64px; align-items: flex-start; padding: 8px 4px 24px; position: relative; min-width: max-content; }
+.lane { display: flex; flex-direction: column; gap: 16px; min-width: 190px; }
+.lane-head { font-size: 10px; text-transform: uppercase; letter-spacing: .05em; color: #fff; background: #4a5568; border-radius: 4px; padding: 4px 8px; text-align: center; }
+.node { padding: 8px 11px; border: 1.5px solid #4a5568; border-radius: 8px; background: #fff; cursor: pointer; font-size: 12px; text-align: center; word-break: break-word; position: relative; z-index: 1; }
+.node.kind-ui { border-color: #3182ce; background: #ebf8ff; }
+.node.kind-outbound { border-color: #dd6b20; background: #fffaf0; }
+.node.kind-route { border-color: #38a169; background: #f0fff4; }
+.node.kind-fn { border-color: #718096; background: #f7fafc; }
+.node:hover { box-shadow: 0 1px 8px rgba(0,0,0,.18); }
+svg.edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; z-index: 0; }
+path.edge { fill: none; stroke: #dd6b20; stroke-width: 2; }
+path.edge.inferred { stroke: #a0aec0; stroke-dasharray: 6 4; }
 .hidden { display: none; }
 #popup { position: fixed; inset: 0; background: rgba(10,18,30,.45); display: flex; align-items: center; justify-content: center; }
 #popup.hidden { display: none; }  /* ID+class beats #popup's display:flex so the modal stays hidden until a node is clicked */
