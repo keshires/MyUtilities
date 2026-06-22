@@ -42,3 +42,16 @@ def test_parse_dispatches_python():
     assert facts.repo == "edfx-api"
     assert len(facts.endpoints) == 3
     assert facts.outbound_calls == []
+
+
+def test_parse_python_includes_outbound():
+    # the py_http fixture has outbound calls; FastAPI fixture has none
+    facts = parse(Path(__file__).resolve().parent / "fixtures" / "py_http", "python", repo="edfx-api")
+    assert len(facts.outbound_calls) == 3
+
+
+def test_extract_fastapi_routes_resolves_constants():
+    eps = extract_fastapi_routes(Path(__file__).resolve().parent / "fixtures" / "py_fastapi_const", repo="svc")
+    paths = {e.path for e in eps}
+    assert "/entity/v1/resolve" in paths           # prefix const + path const
+    assert "/entity/v1/entity/v1/bulk" in paths     # prefix const + (const + literal)

@@ -95,3 +95,46 @@ def test_link_respects_custom_resolver_seam():
     model = link(_facts(), _project(), resolver=MatchAll())
     assert len(model.flows) == 2              # every endpoint now links
     assert all(e.confidence == 1.0 for f in model.flows for e in f.edges)
+
+
+from engine.linker import target_path
+
+
+def test_target_path_extracts_literal_only():
+    assert target_path("'/entity/v1/resolve'") == "/entity/v1/resolve"
+    assert target_path("base + '/financials/client/v1/ratios'") == "/financials/client/v1/ratios"
+    assert target_path("url") == ""  # bare variable -> no path
+
+
+def test_link_connects_outbound_to_downstream_route():
+    from engine.facts import OutboundCall, RepoFacts
+
+    gateway = RepoFacts(
+        repo="edfx-api",
+        language="python",
+        endpoints=[_endpoint("/edfx/v2/x")],  # gateway's own route
+        outbound_calls=[
+            OutboundCall(method="POST", target="'/entity/v1/resolve'", code_ref=_ref())
+        ],
+    )
+    entity = RepoFacts(
+        repo="edfx_entity_api",
+        language="python",
+        endpoints=[Endpoint(id="edfx_entity_api:POST:/entity/v1/resolve", repo="edfx_entity_api",
+                            method="POST", path="/entity/v1/resolve", handler_ref=_ref(), language="python")],
+    )
+    project = Project(id="p", name="p", repos=[
+        RepoRef(url="a", folder="edfx-api", branch="master", sha="1"),
+        RepoRef(url="b", folder="edfx_entity_api", branch="main", sha="2"),
+    ])
+    model = link([gateway, entity], project)
+    flow = next(f for f in model.flows if f.endpoint_id == "edfx_entity_api:POST:/entity/v1/resolve")
+    kinds = sorted(n.kind for n in flow.nodes)
+    assert kinds == ["outbound", "route"]
+    assert flow.edges[0].kind == "http"
+    # gateway's own /edfx/v2/x has no inbound source -> no flow
+    assert not any(f.endpoint_id == "edfx-api:GET:/edfx/v2/x" for f in model.flows)
+
+
+def test_target_path_accepts_bare_resolved_path():
+    assert target_path("/entity/v1/resolve") == "/entity/v1/resolve"
