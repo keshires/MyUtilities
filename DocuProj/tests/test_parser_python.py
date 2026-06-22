@@ -42,3 +42,9 @@ def test_parse_dispatches_python():
     assert facts.repo == "edfx-api"
     assert len(facts.endpoints) == 3
     assert facts.outbound_calls == []
+
+
+def test_parse_python_includes_outbound():
+    # the py_http fixture has outbound calls; FastAPI fixture has none
+    facts = parse(Path(__file__).resolve().parent / "fixtures" / "py_http", "python", repo="edfx-api")
+    assert len(facts.outbound_calls) == 3
