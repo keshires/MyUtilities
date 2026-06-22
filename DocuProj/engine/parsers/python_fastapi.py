@@ -5,13 +5,14 @@ from __future__ import annotations
 from pathlib import Path
 
 from engine.models import CodeRef, Endpoint
-from engine.parsers._support import python_parser, str_literal, text, walk
+from engine.parsers._consts import build_const_map, resolve_expr
+from engine.parsers._support import python_parser, text, walk
 
 _VERBS = {"get", "post", "put", "delete", "patch"}
 
 
-def _router_prefixes(root) -> dict[str, str]:
-    """Map each `x = APIRouter(prefix="...")` variable to its prefix ("" if none)."""
+def _router_prefixes(root, consts) -> dict[str, str]:
+    """Map each `x = APIRouter(prefix=...)` variable to its prefix ("" if none/unresolved)."""
     prefixes: dict[str, str] = {}
     for node in walk(root):
         if node.type != "assignment":
@@ -32,13 +33,15 @@ def _router_prefixes(root) -> dict[str, str]:
                 name = arg.child_by_field_name("name")
                 value = arg.child_by_field_name("value")
                 if name is not None and value is not None and text(name) == "prefix":
-                    prefix = str_literal(value)
+                    resolved = resolve_expr(value, consts)
+                    if resolved is not None:
+                        prefix = resolved
         prefixes[text(left)] = prefix
     return prefixes
 
 
-def _decorator_route(dec, prefixes):
-    """Return (METHOD, full_path) for a matching @<router>.<verb>("path") decorator."""
+def _decorator_route(dec, prefixes, consts):
+    """Return (METHOD, full_path) for a matching @<router>.<verb>(path) decorator."""
     calls = [c for c in dec.children if c.type == "call"]
     if not calls:
         return None
@@ -56,10 +59,11 @@ def _decorator_route(dec, prefixes):
     path = ""
     args = call.child_by_field_name("arguments")
     if args is not None:
-        for a in args.children:
-            if a.type == "string":
-                path = str_literal(a)
-                break
+        reals = [a for a in args.children if a.type not in ("(", ")", ",")]
+        if reals:
+            resolved = resolve_expr(reals[0], consts)
+            if resolved is not None:
+                path = resolved
     full = prefixes[router] + path
     return verb.upper(), (full or "/")
 
@@ -77,11 +81,12 @@ def _function_definition(decorated):
 def extract_fastapi_routes(repo_path, repo: str) -> list[Endpoint]:
     repo_root = Path(repo_path)
     parser = python_parser()
+    consts = build_const_map(repo_root)
     endpoints: list[Endpoint] = []
     for py in sorted(repo_root.rglob("*.py")):
         source = py.read_bytes()
         root = parser.parse(source).root_node
-        prefixes = _router_prefixes(root)
+        prefixes = _router_prefixes(root, consts)
         if not prefixes:
             continue
         rel = py.relative_to(repo_root).as_posix()
@@ -95,7 +100,7 @@ def extract_fastapi_routes(repo_path, repo: str) -> list[Endpoint]:
             route = None
             for dec in node.children:
                 if dec.type == "decorator":
-                    route = _decorator_route(dec, prefixes)
+                    route = _decorator_route(dec, prefixes, consts)
                     if route:
                         break
             if route is None:
