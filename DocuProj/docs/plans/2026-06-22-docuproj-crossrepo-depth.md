@@ -384,6 +384,14 @@ Expected: endpoint count grows well beyond 87 (entity_api + financials-api route
 
 ---
 
+## Addendum — Tasks 5–7: constant resolution (added after Task 4 validation)
+
+Task 4 revealed the EDFX services build route paths and outbound targets from **module-level named constants** (`CLIENT_FINANCIALS_CONTEXT`, `VERSION_1`, …), so literal matching found 0 links and downstream paths were mis-extracted. Fix deterministically:
+
+- **Task 5 — `engine/parsers/_consts.py`:** `build_const_map(repo_root)` scans module-level `NAME = "literal"` assignments repo-wide; `resolve_expr(node, consts)` resolves a string / identifier / `+`-concatenation node to a string (else `None`). TDD with a small fixture.
+- **Task 6 — wire into `python_fastapi.py`:** build the const map per repo; when a router `prefix` or decorator path is an identifier/concatenation (not a string), resolve it via the map. Fixture: a router whose prefix + path are constants → resolves to the real path.
+- **Task 7 — wire into `python_http.py` + re-validate:** resolve outbound targets through the const map too; then re-run the 4-repo analysis. Expect downstream route paths now correct, and UI per-service config URLs (`entitySearchApiUrl`, `clientFinancialsApiUrl`) prefix-matching downstream routes → cross-repo flows into `edfx_entity_api` / `edfx-client-financials-api`.
+
 ## Self-Review
 
 **Spec coverage (§3 Linker — cross-repo join):**
