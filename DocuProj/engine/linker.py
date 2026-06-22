@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -17,6 +18,15 @@ def url_path(url: str) -> str:
     if parts.scheme or parts.netloc:
         return parts.path
     return url
+
+
+_PATH_LITERAL = re.compile(r"""['"`](/[^'"`]*)['"`]""")
+
+
+def target_path(target: str) -> str:
+    """Extract a literal path fragment from an outbound target expression, else ''."""
+    m = _PATH_LITERAL.search(target)
+    return m.group(1) if m else ""
 
 
 class LinkQuery(BaseModel):
@@ -56,11 +66,17 @@ def link(
 ) -> AnalysisModel:
     resolver = resolver or DeterministicResolver()
     endpoints = [ep for f in facts for ep in f.endpoints]
-    sources = [
-        (f.repo, c.key, url_path(c.url), c.code_ref)
-        for f in facts
-        for c in f.config_urls
-    ]
+
+    # Sources: UI config URLs (kind "ui") + outbound HTTP calls (kind "outbound").
+    sources = []
+    for f in facts:
+        for c in f.config_urls:
+            sources.append((f.repo, "ui", c.key, url_path(c.url), c.code_ref))
+        for o in f.outbound_calls:
+            sources.append(
+                (f.repo, "outbound", f"{o.method} {o.target}"[:48], target_path(o.target), o.code_ref)
+            )
+
     flows: list[Flow] = []
     for ep in endpoints:
         route = FlowNode(
@@ -72,18 +88,20 @@ def link(
         )
         nodes: list[FlowNode] = []
         edges: list[FlowEdge] = []
-        seen_ui: set[str] = set()
-        for repo, label, spath, ref in sources:
+        seen: set[str] = set()
+        for src_repo, kind, label, spath, ref in sources:
+            if src_repo == ep.repo:
+                continue  # cross-repo links only
             confidence = resolver.score(
                 LinkQuery(source_label=label, source_path=spath, source_ref=ref, endpoint=ep)
             )
             if confidence is None:
                 continue
-            uid = f"ui:{repo}:{label}"
-            if uid not in seen_ui:
-                nodes.append(FlowNode(id=uid, repo=repo, label=label, kind="ui", code_ref=ref))
-                seen_ui.add(uid)
-            edges.append(FlowEdge(from_node=uid, to_node=route.id, kind="http", confidence=confidence))
+            nid = f"{kind}:{src_repo}:{label}"
+            if nid not in seen:
+                nodes.append(FlowNode(id=nid, repo=src_repo, label=label, kind=kind, code_ref=ref))
+                seen.add(nid)
+            edges.append(FlowEdge(from_node=nid, to_node=route.id, kind="http", confidence=confidence))
         if edges:
             nodes.append(route)
             flows.append(Flow(endpoint_id=ep.id, nodes=nodes, edges=edges))
