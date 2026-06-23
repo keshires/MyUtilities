@@ -28,3 +28,9 @@ def test_resolve_expr_string_identifier_and_concat():
     assert resolve_expr(_first_router_arg("f(CTX)"), consts) == "/entity/v1"
     assert resolve_expr(_first_router_arg('f(CTX + VER + "/resolve")'), consts) == "/entity/v1/v2/resolve"
     assert resolve_expr(_first_router_arg("f(unknown_name)"), consts) is None
+
+
+def test_resolve_expr_fstring():
+    consts = {"CTX": "entity"}
+    assert resolve_expr(_first_router_arg("f(f'/{CTX}/x')"), consts) == "/entity/x"
+    assert resolve_expr(_first_router_arg("f(f'/{UNKNOWN}/x')"), consts) is None

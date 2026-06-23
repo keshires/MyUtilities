@@ -36,7 +36,21 @@ def resolve_expr(node, consts: dict[str, str]) -> str | None:
     if node is None:
         return None
     if node.type == "string":
-        return str_literal(node)
+        interps = [c for c in node.children if c.type == "interpolation"]
+        if not interps:
+            return str_literal(node)
+        # f-string: concatenate literal content with resolved interpolations, in order
+        parts: list[str] = []
+        for c in node.children:
+            if c.type in ("string_content", "string_fragment"):
+                parts.append(text(c))
+            elif c.type == "interpolation":
+                inner = next((g for g in c.children if g.type not in ("{", "}")), None)
+                resolved = resolve_expr(inner, consts)
+                if resolved is None:
+                    return None
+                parts.append(resolved)
+        return "".join(parts)
     if node.type == "identifier":
         return consts.get(text(node))
     if node.type == "binary_operator":

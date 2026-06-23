@@ -55,3 +55,10 @@ def test_extract_fastapi_routes_resolves_constants():
     paths = {e.path for e in eps}
     assert "/entity/v1/resolve" in paths           # prefix const + path const
     assert "/entity/v1/entity/v1/bulk" in paths     # prefix const + (const + literal)
+
+
+def test_extract_fastapi_path_kwarg_and_include_prefix():
+    eps = extract_fastapi_routes(Path(__file__).resolve().parent / "fixtures" / "py_fastapi_include", repo="svc")
+    paths = {e.path for e in eps}
+    # path= kwarg (PFX + "/items") resolved AND include_router(r, prefix="/svc") applied
+    assert "/svc/v1/items" in paths
