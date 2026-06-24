@@ -62,3 +62,11 @@ def test_extract_fastapi_path_kwarg_and_include_prefix():
     paths = {e.path for e in eps}
     # path= kwarg (PFX + "/items") resolved AND include_router(r, prefix="/svc") applied
     assert "/svc/v1/items" in paths
+
+
+def test_extract_fastapi_cross_file_include_graph():
+    fix = Path(__file__).resolve().parent / "fixtures" / "py_include_graph"
+    eps = extract_fastapi_routes(fix, repo="entity")
+    paths = {e.path for e in eps}
+    assert "/entity/v1/items" in paths   # app.include_router(api.router, prefix='/entity') -> api includes items_route
+    assert "/loans/x" in paths            # app.include_router(loan_router, prefix='/loans')
