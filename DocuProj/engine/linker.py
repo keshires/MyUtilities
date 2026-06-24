@@ -110,3 +110,44 @@ def link(
             nodes.append(route)
             flows.append(Flow(endpoint_id=ep.id, nodes=nodes, edges=edges))
     return AnalysisModel(project=project, endpoints=endpoints, flows=flows)
+
+
+def enrich_flows(model: AnalysisModel, facts, resolver) -> AnalysisModel:
+    """Augment a deterministic AnalysisModel with Claude-resolved cross-repo links.
+
+    `resolver.resolve(sources, endpoints)` returns ResolvedLink(source_index, endpoint_id,
+    confidence). Each confirmed link adds an `outbound` source node + `http` edge to the
+    target endpoint's flow (creating the flow if the deterministic pass produced none).
+    """
+    sources = [(f.repo, o) for f in facts for o in f.outbound_calls]
+    endpoints_by_id = {ep.id: ep for ep in model.endpoints}
+    candidates = list(model.endpoints)
+    links = resolver.resolve([o for _repo, o in sources], candidates)
+
+    flows_by_endpoint = {f.endpoint_id: f for f in model.flows}
+    for link_ in links:
+        if link_.source_index >= len(sources):
+            continue
+        src_repo, call = sources[link_.source_index]
+        ep = endpoints_by_id.get(link_.endpoint_id)
+        if ep is None or src_repo == ep.repo:
+            continue  # cross-repo links only
+        nid = f"outbound:{src_repo}:{link_.source_index}"
+        flow = flows_by_endpoint.get(ep.id)
+        if flow is None:
+            route = FlowNode(
+                id=f"route:{ep.id}", repo=ep.repo, label=f"{ep.method} {ep.path}",
+                kind="route", code_ref=ep.handler_ref,
+            )
+            flow = Flow(endpoint_id=ep.id, nodes=[route], edges=[])
+            flows_by_endpoint[ep.id] = flow
+            model.flows.append(flow)
+        route_id = f"route:{ep.id}"
+        if not any(n.id == nid for n in flow.nodes):
+            flow.nodes.insert(
+                0, FlowNode(id=nid, repo=src_repo, label=f"{call.method} {call.target}"[:48],
+                            kind="outbound", code_ref=call.code_ref)
+            )
+        if not any(e.from_node == nid and e.to_node == route_id for e in flow.edges):
+            flow.edges.append(FlowEdge(from_node=nid, to_node=route_id, kind="http", confidence=link_.confidence))
+    return model
