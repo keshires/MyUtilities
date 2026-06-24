@@ -112,6 +112,76 @@ def link(
     return AnalysisModel(project=project, endpoints=endpoints, flows=flows)
 
 
+def _match_downstream(path: str, endpoints, exclude_repo: str):
+    """Find an endpoint in another repo whose path the given path hits (exact > prefix)."""
+    if not path:
+        return None
+    p = path.rstrip("/")
+    best = None
+    for ep in endpoints:
+        if ep.repo == exclude_repo:
+            continue
+        if ep.path == path or ep.path == p:
+            return ep  # exact wins immediately
+        if p and (ep.path.startswith(p + "/") or path.startswith(ep.path.rstrip("/") + "/")):
+            best = best or ep
+    return best
+
+
+def trace_flows(facts, project, resolver: Resolver | None = None, max_depth: int = 4) -> AnalysisModel:
+    """Forward provenance: for each endpoint, trace handler -> DB (datastore) and
+    handler -> outbound -> downstream endpoint (recurse) until datastores/leaves."""
+    endpoints = [ep for f in facts for ep in f.endpoints]
+    by_id = {ep.id: ep for ep in endpoints}
+    prov: dict = {}
+    for f in facts:
+        prov.update(f.handler_provenance)
+
+    def route_node(ep) -> FlowNode:
+        return FlowNode(id=f"route:{ep.id}", repo=ep.repo, label=f"{ep.method} {ep.path}",
+                        kind="route", code_ref=ep.handler_ref)
+
+    flows: list[Flow] = []
+    for entry in endpoints:
+        nodes: dict[str, FlowNode] = {}
+        edges: list[FlowEdge] = []
+        edge_keys: set = set()
+        visited: set[str] = set()
+
+        def add_edge(frm, to, kind, conf):
+            if (frm, to, kind) not in edge_keys:
+                edges.append(FlowEdge(from_node=frm, to_node=to, kind=kind, confidence=conf))
+                edge_keys.add((frm, to, kind))
+
+        def expand(ep, depth: int):
+            if ep.id in visited or depth > max_depth:
+                return
+            visited.add(ep.id)
+            r_id = f"route:{ep.id}"
+            nodes.setdefault(r_id, route_node(ep))
+            hp = prov.get(ep.id)
+            if hp is None:
+                return
+            if hp.db:  # one datastore node per repo, edge route -> datastore
+                ds_id = f"datastore:{ep.repo}"
+                nodes.setdefault(ds_id, FlowNode(id=ds_id, repo=ep.repo, label=f"{ep.repo} datastore",
+                                                 kind="datastore", code_ref=hp.db[0].code_ref))
+                add_edge(r_id, ds_id, "db", 1.0)
+            for call in hp.outbound:
+                path = target_path(call.target)
+                down = _match_downstream(path, endpoints, ep.repo)
+                if down is None:
+                    continue
+                nodes.setdefault(f"route:{down.id}", route_node(down))
+                add_edge(r_id, f"route:{down.id}", "http", 0.5)
+                expand(down, depth + 1)
+
+        expand(entry, 0)
+        if len(nodes) > 1:  # keep only endpoints that actually flow somewhere
+            flows.append(Flow(endpoint_id=entry.id, nodes=list(nodes.values()), edges=edges))
+    return AnalysisModel(project=project, endpoints=endpoints, flows=flows)
+
+
 def enrich_flows(model: AnalysisModel, facts, resolver) -> AnalysisModel:
     """Augment a deterministic AnalysisModel with Claude-resolved cross-repo links.
 

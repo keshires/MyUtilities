@@ -20,6 +20,7 @@ from engine.linker import (
     enrich_flows,
     link,
     target_path,
+    trace_flows,
     url_path,
 )
 from engine.claude_resolver import ClaudeResolver, ResolvedLink
@@ -53,5 +54,6 @@ __all__ = [
     "load_project",
     "parse",
     "target_path",
+    "trace_flows",
     "url_path",
 ]
