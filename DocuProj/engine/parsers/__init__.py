@@ -6,6 +6,7 @@ from pathlib import Path
 
 from engine.facts import RepoFacts
 from engine.parsers._consts import build_const_map
+from engine.parsers.python_db import extract_python_db
 from engine.parsers.python_fastapi import extract_fastapi_routes
 from engine.parsers.python_http import extract_python_outbound
 from engine.parsers.ts_angular import extract_angular_outbound
@@ -21,6 +22,7 @@ def parse(repo_path, language: str, repo: str | None = None) -> RepoFacts:
             language="python",
             endpoints=extract_fastapi_routes(repo_path, repo, consts),
             outbound_calls=extract_python_outbound(repo_path, repo, consts),
+            db_accesses=extract_python_db(repo_path, repo, consts),
         )
     if lang in ("typescript", "angular", "ts", "tsx"):
         outbound, configs = extract_angular_outbound(repo_path, repo)

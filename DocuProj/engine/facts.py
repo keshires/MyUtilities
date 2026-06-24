@@ -19,9 +19,16 @@ class ConfigUrl(BaseModel):
     code_ref: CodeRef
 
 
+class DbAccess(BaseModel):
+    engine: str  # "sqlalchemy" | "raw_sql" | "psycopg"
+    detail: str  # table name or query fragment (best-effort)
+    code_ref: CodeRef
+
+
 class RepoFacts(BaseModel):
     repo: str
     language: str
     endpoints: list[Endpoint] = []
     outbound_calls: list[OutboundCall] = []
     config_urls: list[ConfigUrl] = []
+    db_accesses: list[DbAccess] = []
