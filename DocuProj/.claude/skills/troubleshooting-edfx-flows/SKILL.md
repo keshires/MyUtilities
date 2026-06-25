@@ -34,7 +34,22 @@ git clone --depth 1 --branch master https://github.com/moodysanalytics/edfx-api 
 git clone --depth 1 --branch main   https://github.com/moodysanalytics/edfx-tessera-service $WS/edfx-tessera-service
 ```
 
-## Step 2 — pick the recipe for the question
+## Step 2 — the one command
+
+`flow.py` auto-discovers every repo cloned under `.workspace/edfx-flow`, traces forward
+provenance, and prints the flow for any endpoint (substring match). **Run from `DocuProj/`:**
+
+```bash
+./.venv/Scripts/python flow.py portfolios          # or: bulk, edfx/v2/tools, entities/bonds
+./.venv/Scripts/python flow.py portfolios --claude  # also resolve variable-URL service hops (needs ANTHROPIC_API_KEY)
+```
+
+Output is the provenance chain per matching endpoint — node `kind` / `repo` / `label` and the
+exact `file:line`, plus the edges (`db` = reads DB, `http` = calls a service). Pass the
+distinctive part of the path (a leading `/` works too). That's usually all you need; the recipes
+below are for scripting or "who calls this" (backward) questions.
+
+## Step 3 — other recipes (scripting / backward)
 
 | Question | Function | Direction |
 |----------|----------|-----------|
