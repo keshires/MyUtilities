@@ -61,7 +61,7 @@ async function loadFlow(ep) {
   renderSwimlanes(CURRENT_FLOW);
 }
 
-const KIND_RANK = { ui: 0, outbound: 1, fn: 2, route: 3 };
+const KIND_RANK = { ui: 0, outbound: 1, fn: 2, route: 3, datastore: 4 };
 
 function renderSwimlanes(flow) {
   const canvas = document.getElementById("flow-canvas");
@@ -131,7 +131,8 @@ function drawEdges(flow, container, svg, nodeEls) {
     const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
     path.setAttribute("d", `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`);
     const inferred = e.confidence < 1.0;
-    path.setAttribute("class", inferred ? "edge inferred" : "edge");
+    const cls = "edge" + (inferred ? " inferred" : "") + (e.kind === "db" ? " db" : "");
+    path.setAttribute("class", cls);
     path.setAttribute("marker-end", inferred ? "url(#arrow-dim)" : "url(#arrow)");
     svg.appendChild(path);
   });
