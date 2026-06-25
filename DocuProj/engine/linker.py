@@ -128,19 +128,50 @@ def _match_downstream(path: str, endpoints, exclude_repo: str):
     return best
 
 
-def trace_flows(facts, project, resolver: Resolver | None = None, max_depth: int = 4) -> AnalysisModel:
+def trace_flows(facts, project, resolver=None, max_depth: int = 4) -> AnalysisModel:
     """Forward provenance: for each endpoint, trace handler -> DB (datastore) and
-    handler -> outbound -> downstream endpoint (recurse) until datastores/leaves."""
+    handler -> outbound -> downstream endpoint (recurse) until datastores/leaves.
+
+    Two phases: (1) build a global forward adjacency — deterministic path matches plus,
+    if a batch `resolver` (e.g. ClaudeResolver) is given, one batch resolution of the
+    variable-URL outbound calls deterministic matching can't resolve; (2) BFS per endpoint.
+    """
     endpoints = [ep for f in facts for ep in f.endpoints]
     by_id = {ep.id: ep for ep in endpoints}
     prov: dict = {}
     for f in facts:
         prov.update(f.handler_provenance)
 
+    # Phase 1 — global adjacency: endpoint_id -> [(downstream_id, confidence)]
+    downstream: dict[str, list] = {}
+    unresolved: list[tuple[str, object]] = []  # (source_endpoint_id, OutboundCall) for variable targets
+    for ep in endpoints:
+        hp = prov.get(ep.id)
+        if hp is None:
+            continue
+        for call in hp.outbound:
+            path = target_path(call.target)
+            if path:
+                down = _match_downstream(path, endpoints, ep.repo)
+                if down is not None:
+                    downstream.setdefault(ep.id, []).append((down.id, 0.5))
+            else:
+                unresolved.append((ep.id, call))
+
+    if resolver is not None and unresolved:
+        for link_ in resolver.resolve([c for _eid, c in unresolved], endpoints):
+            if link_.source_index >= len(unresolved):
+                continue
+            src_eid, _call = unresolved[link_.source_index]
+            down = by_id.get(link_.endpoint_id)
+            if down is not None and down.repo != by_id[src_eid].repo:
+                downstream.setdefault(src_eid, []).append((down.id, link_.confidence))
+
     def route_node(ep) -> FlowNode:
         return FlowNode(id=f"route:{ep.id}", repo=ep.repo, label=f"{ep.method} {ep.path}",
                         kind="route", code_ref=ep.handler_ref)
 
+    # Phase 2 — BFS each endpoint over the adjacency, adding datastore terminals
     flows: list[Flow] = []
     for entry in endpoints:
         nodes: dict[str, FlowNode] = {}
@@ -153,31 +184,29 @@ def trace_flows(facts, project, resolver: Resolver | None = None, max_depth: int
                 edges.append(FlowEdge(from_node=frm, to_node=to, kind=kind, confidence=conf))
                 edge_keys.add((frm, to, kind))
 
-        def expand(ep, depth: int):
-            if ep.id in visited or depth > max_depth:
+        def expand(eid: str, depth: int):
+            if eid in visited or depth > max_depth:
                 return
-            visited.add(ep.id)
-            r_id = f"route:{ep.id}"
-            nodes.setdefault(r_id, route_node(ep))
-            hp = prov.get(ep.id)
-            if hp is None:
-                return
-            if hp.db:  # one datastore node per repo, edge route -> datastore
-                ds_id = f"datastore:{ep.repo}"
-                nodes.setdefault(ds_id, FlowNode(id=ds_id, repo=ep.repo, label=f"{ep.repo} datastore",
+            visited.add(eid)
+            cur = by_id[eid]
+            r_id = f"route:{eid}"
+            nodes.setdefault(r_id, route_node(cur))
+            hp = prov.get(eid)
+            if hp is not None and hp.db:
+                ds_id = f"datastore:{cur.repo}"
+                nodes.setdefault(ds_id, FlowNode(id=ds_id, repo=cur.repo, label=f"{cur.repo} datastore",
                                                  kind="datastore", code_ref=hp.db[0].code_ref))
                 add_edge(r_id, ds_id, "db", 1.0)
-            for call in hp.outbound:
-                path = target_path(call.target)
-                down = _match_downstream(path, endpoints, ep.repo)
+            for down_id, conf in downstream.get(eid, []):
+                down = by_id.get(down_id)
                 if down is None:
                     continue
-                nodes.setdefault(f"route:{down.id}", route_node(down))
-                add_edge(r_id, f"route:{down.id}", "http", 0.5)
-                expand(down, depth + 1)
+                nodes.setdefault(f"route:{down_id}", route_node(down))
+                add_edge(r_id, f"route:{down_id}", "http", conf)
+                expand(down_id, depth + 1)
 
-        expand(entry, 0)
-        if len(nodes) > 1:  # keep only endpoints that actually flow somewhere
+        expand(entry.id, 0)
+        if len(nodes) > 1:
             flows.append(Flow(endpoint_id=entry.id, nodes=list(nodes.values()), edges=edges))
     return AnalysisModel(project=project, endpoints=endpoints, flows=flows)
 

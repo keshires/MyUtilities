@@ -1,5 +1,6 @@
-"""Live Claude-resolver demo: analyze the cloned EDFX repos, then ask Claude to
-resolve the indirected cross-repo links the deterministic linker can't.
+"""Live Claude-resolver demo for forward provenance: analyze the cloned EDFX repos,
+then trace each endpoint forward (handler -> downstream service -> datastore), using
+Claude to resolve the variable-URL gateway->service calls deterministic matching can't.
 
 Requires ANTHROPIC_API_KEY (real API calls, spends tokens). Run from DocuProj/:
     ./.venv/Scripts/python claude_demo.py
@@ -8,7 +9,7 @@ Requires ANTHROPIC_API_KEY (real API calls, spends tokens). Run from DocuProj/:
 import os
 import sys
 
-from engine import ClaudeResolver, Project, RepoRef, enrich_flows, link, parse
+from engine import ClaudeResolver, Project, RepoRef, parse, trace_flows
 
 WS = ".workspace/edfx-flow"
 SPECS = [
@@ -16,6 +17,7 @@ SPECS = [
     ("edfx-api", "python", "master"),
     ("edfx_entity_api", "python", "main"),
     ("edfx-client-financials-api", "python", "main"),
+    ("edfx-tessera-service", "python", "main"),
 ]
 
 
@@ -23,7 +25,7 @@ def main() -> int:
     if not os.environ.get("ANTHROPIC_API_KEY"):
         print(
             "ANTHROPIC_API_KEY is not set - skipping the live Claude run.\n"
-            "Set it and re-run to resolve indirected links:\n"
+            "Set it and re-run to resolve gateway->service edges:\n"
             '    $env:ANTHROPIC_API_KEY = "sk-ant-..."   # PowerShell\n'
             "    ./.venv/Scripts/python claude_demo.py"
         )
@@ -34,26 +36,26 @@ def main() -> int:
         id="edfx-flow", name="EDFX Flow",
         repos=[RepoRef(url="x", folder=f, branch=b, sha=f) for f, _, b in SPECS],
     )
-    model = link(facts, project)
-    before = len(model.flows)
-    print(f"deterministic: {len(model.endpoints)} endpoints, {before} flows")
 
-    model = enrich_flows(model, facts, ClaudeResolver())
-    added = len(model.flows) - before
-    print(f"after Claude enrichment: {len(model.flows)} flows (+{added})")
+    det = trace_flows(facts, project)
+    full = trace_flows(facts, project, resolver=ClaudeResolver())
 
-    # show a few Claude-added flows (those with an `outbound` source node)
+    def multi_repo(model):
+        return [fl for fl in model.flows if len({n.repo for n in fl.nodes}) >= 3]
+
+    print(f"forward flows: deterministic={len(det.flows)}, with-Claude={len(full.flows)}")
+    print(f"multi-repo chains (>=3 repos): deterministic={len(multi_repo(det))}, with-Claude={len(multi_repo(full))}\n")
+
     shown = 0
-    for fl in model.flows:
-        outs = [n for n in fl.nodes if n.kind == "outbound"]
-        if not outs:
-            continue
-        route = next(n for n in fl.nodes if n.kind == "route")
-        conf = max(e.confidence for e in fl.edges)
-        print(f"   {route.label[:44]:44} <= {outs[0].label[:32]}  conf={conf}")
-        shown += 1
-        if shown >= 8:
-            break
+    for fl in full.flows:
+        repos = {n.repo for n in fl.nodes}
+        has_ds = any(n.kind == "datastore" for n in fl.nodes)
+        if len(repos) >= 3 and has_ds:
+            chain = " -> ".join(n.label[:24] for n in fl.nodes)
+            print(f"   {fl.endpoint_id[-40:]}:\n      {chain}")
+            shown += 1
+            if shown >= 6:
+                break
     return 0
 
 
