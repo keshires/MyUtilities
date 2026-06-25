@@ -36,14 +36,14 @@ class FlowNode(_Model):
     id: str
     repo: str
     label: str
-    kind: Literal["ui", "route", "fn", "outbound"]
+    kind: Literal["ui", "route", "fn", "outbound", "datastore"]
     code_ref: CodeRef = Field(alias="codeRef")
 
 
 class FlowEdge(_Model):
     from_node: str = Field(alias="from")
     to_node: str = Field(alias="to")
-    kind: Literal["calls", "http"]
+    kind: Literal["calls", "http", "db"]
     confidence: float = Field(ge=0.0, le=1.0)
 
 

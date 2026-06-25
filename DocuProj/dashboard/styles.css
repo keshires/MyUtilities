@@ -24,10 +24,12 @@ aside { width: 320px; border-right: 1px solid #dde3ec; display: flex; flex-direc
 .node.kind-outbound { border-color: #dd6b20; background: #fffaf0; }
 .node.kind-route { border-color: #38a169; background: #f0fff4; }
 .node.kind-fn { border-color: #718096; background: #f7fafc; }
+.node.kind-datastore { border-color: #2c5282; background: #ebf2fb; border-radius: 8px / 22px; font-weight: 600; color: #2c5282; }
 .node:hover { box-shadow: 0 1px 8px rgba(0,0,0,.18); }
 svg.edges { position: absolute; top: 0; left: 0; pointer-events: none; overflow: visible; z-index: 0; }
 path.edge { fill: none; stroke: #dd6b20; stroke-width: 2; }
 path.edge.inferred { stroke: #a0aec0; stroke-dasharray: 6 4; }
+path.edge.db { stroke: #2c5282; stroke-dasharray: 2 3; }
 .hidden { display: none; }
 #popup { position: fixed; inset: 0; background: rgba(10,18,30,.45); display: flex; align-items: center; justify-content: center; }
 #popup.hidden { display: none; }  /* ID+class beats #popup's display:flex so the modal stays hidden until a node is clicked */

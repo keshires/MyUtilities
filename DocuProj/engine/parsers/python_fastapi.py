@@ -63,18 +63,15 @@ def _function_definition(decorated):
     return None
 
 
-def extract_fastapi_routes(repo_path, repo: str, consts: dict | None = None) -> list[Endpoint]:
+def _iter_routes(repo_path, consts):
+    """Yield (method, full_path, fn_def, rel, lines) for every FastAPI route in the repo."""
     repo_root = Path(repo_path)
     parser = python_parser()
-    if consts is None:
-        consts = build_const_map(repo_root)
     full_prefixes = build_full_prefixes(repo_root, consts)
-    endpoints: list[Endpoint] = []
     for py in sorted(repo_root.rglob("*.py")):
         source = py.read_bytes()
         root = parser.parse(source).root_node
         rel = py.relative_to(repo_root).as_posix()
-        # prefixes for the router vars defined in THIS file (full cross-file prefix each)
         prefixes = {var: pfx for (f, var), pfx in full_prefixes.items() if f == rel}
         if not prefixes:
             continue
@@ -94,17 +91,31 @@ def extract_fastapi_routes(repo_path, repo: str, consts: dict | None = None) -> 
             if route is None:
                 continue
             method, path = route
-            row = fn_def.start_point[0]
-            snippet = lines[row].strip() if row < len(lines) else ""
-            ref = CodeRef(repo=repo, file=rel, line=row + 1, snippet=snippet)
-            endpoints.append(
-                Endpoint(
-                    id=f"{repo}:{method}:{path}",
-                    repo=repo,
-                    method=method,
-                    path=path,
-                    handler_ref=ref,
-                    language="python",
-                )
-            )
+            yield method, path, fn_def, rel, lines
+
+
+def extract_fastapi_routes(repo_path, repo: str, consts: dict | None = None) -> list[Endpoint]:
+    repo_root = Path(repo_path)
+    if consts is None:
+        consts = build_const_map(repo_root)
+    endpoints: list[Endpoint] = []
+    for method, path, fn_def, rel, lines in _iter_routes(repo_root, consts):
+        row = fn_def.start_point[0]
+        snippet = lines[row].strip() if row < len(lines) else ""
+        ref = CodeRef(repo=repo, file=rel, line=row + 1, snippet=snippet)
+        endpoints.append(
+            Endpoint(id=f"{repo}:{method}:{path}", repo=repo, method=method, path=path,
+                     handler_ref=ref, language="python")
+        )
     return endpoints
+
+
+def iter_route_handlers(repo_path, repo: str, consts: dict | None = None):
+    """Yield (endpoint_id, handler_function_name) for every route — seeds the call graph."""
+    repo_root = Path(repo_path)
+    if consts is None:
+        consts = build_const_map(repo_root)
+    for method, path, fn_def, _rel, _lines in _iter_routes(repo_root, consts):
+        name_node = fn_def.child_by_field_name("name")
+        if name_node is not None:
+            yield f"{repo}:{method}:{path}", text(name_node)

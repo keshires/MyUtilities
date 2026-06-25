@@ -19,9 +19,25 @@ class ConfigUrl(BaseModel):
     code_ref: CodeRef
 
 
+class DbAccess(BaseModel):
+    engine: str  # "sqlalchemy" | "raw_sql" | "psycopg"
+    detail: str  # table name or query fragment (best-effort)
+    code_ref: CodeRef
+
+
+class HandlerProvenance(BaseModel):
+    """Outbound calls + DB accesses reachable from one endpoint's handler (transitively)."""
+
+    outbound: list[OutboundCall] = []
+    db: list[DbAccess] = []
+
+
 class RepoFacts(BaseModel):
     repo: str
     language: str
     endpoints: list[Endpoint] = []
     outbound_calls: list[OutboundCall] = []
     config_urls: list[ConfigUrl] = []
+    db_accesses: list[DbAccess] = []
+    # endpoint id -> facts reachable from that endpoint's handler body
+    handler_provenance: dict[str, HandlerProvenance] = {}
