@@ -7,7 +7,7 @@ Shared repository for support and day-to-day operational utilities.
 | Folder | Purpose |
 |--------|---------|
 | [**Day2Day_Utillites**](Day2Day_Utillites/) | Python scripts for recurring daily tasks — Postgres KPIs, EDFX/RiskCalc APIs, stale-entity exports, OpenSearch queries, batch loads, and related tooling. See [Day2Day_Utillites/Docs/](Day2Day_Utillites/Docs/) for run guides. |
-| [**DocuProj**](DocuProj/) | Documentation project assets. |
+| [**DocuProj**](DocuProj/) | Static analyzer for **cross-repo flows** across the EDFX fleet — traces who calls an endpoint and where it gets its data (services → database), with a swimlane dashboard and a Claude Code troubleshooting skill. See [DocuProj/README.md](DocuProj/README.md). |
 
 ## Day2Day_Utillites — quick start
 
