@@ -3,7 +3,19 @@ backward (UI -> endpoint, deterministic links) merged with forward provenance
 (endpoint -> downstream service -> datastore). Serves the dashboard at /app/.
 """
 
-from engine import AnalysisModel, Flow, Project, RepoRef, create_app, link, parse, trace_flows
+import os
+
+from engine import (
+    AnalysisModel,
+    ClaudeResolver,
+    Flow,
+    Project,
+    RepoRef,
+    create_app,
+    link,
+    parse,
+    trace_flows,
+)
 
 WS = ".workspace/edfx-flow"
 SPECS = [
@@ -39,7 +51,11 @@ project = Project(
     id="edfx-flow", name="EDFX Flow",
     repos=[RepoRef(url="x", folder=f, branch=b, sha=f) for f, _, b in SPECS],
 )
-model = _merge(link(facts, project), trace_flows(facts, project))
+# Resolve runtime-variable gateway->service hops with Claude when a key is present;
+# otherwise the deterministic forward trace runs offline (variable-URL edges stay unlinked).
+resolver = ClaudeResolver() if os.environ.get("ANTHROPIC_API_KEY") else None
+print(f"Forward trace: {'Claude resolver (ANTHROPIC_API_KEY set)' if resolver else 'deterministic only'}")
+model = _merge(link(facts, project), trace_flows(facts, project, resolver=resolver))
 ds = sum(1 for fl in model.flows for n in fl.nodes if n.kind == "datastore")
 print(f"Combined: {len(model.endpoints)} endpoints, {len(model.flows)} flows, {ds} datastore nodes. Dashboard at /app/")
 app = create_app(projects_dir="projects", workspace=".workspace", store={"edfx-flow": model})

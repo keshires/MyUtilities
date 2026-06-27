@@ -18,14 +18,18 @@ All commands run from the **`DocuProj/`** directory. Cloned repos live in the gi
 
 ```bash
 cd DocuProj
-python -m venv .venv
-./.venv/Scripts/pip install -r requirements.txt   # Windows; Linux/macOS: .venv/bin/pip
+python bootstrap.py            # creates .venv, installs deps, clones the default repo chain
+# offline / CI (no repo access): python bootstrap.py --skip-clone
 ```
+
+`bootstrap.py` also clones the default UI→gateway→Tessera→DB chain, so for that path you can
+skip Step 1. Manual equivalent: `python -m venv .venv && ./.venv/Scripts/pip install -r requirements.txt`.
 
 ## Step 1 — clone the repos on the path you're troubleshooting
 
-A repo is invisible until it's cloned into `.workspace`. **`edfx-api` is branch `master`; most
-others are `main`** (check `REPOS.md`). Example for a UI→gateway→Tessera→DB question:
+A repo is invisible until it's cloned into `.workspace`. `bootstrap.py` covers the default chain;
+clone others on your path here. **`edfx-api` is branch `master`; most others are `main`**
+(check `REPOS.md`). Example for a UI→gateway→Tessera→DB question:
 
 ```bash
 WS=.workspace/edfx-flow

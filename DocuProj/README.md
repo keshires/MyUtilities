@@ -15,15 +15,14 @@ project.json ─▶ Ingest ─▶ Parse ─▶ Link ─▶ Cache ─▶ API ─�
 
 ```bash
 cd DocuProj
-python -m venv .venv
-./.venv/Scripts/pip install -r requirements.txt          # Linux/macOS: .venv/bin/pip
-
-# clone the repos on the path you care about (edfx-api is branch `master`, others `main` — see REPOS.md)
-WS=.workspace/edfx-flow
-git clone --depth 1 --branch main   https://github.com/moodysanalytics/edfx-app-ui          $WS/edfx-app-ui
-git clone --depth 1 --branch master https://github.com/moodysanalytics/edfx-api             $WS/edfx-api
-git clone --depth 1 --branch main   https://github.com/moodysanalytics/edfx-tessera-service $WS/edfx-tessera-service
+python bootstrap.py            # creates .venv, installs deps, clones the default UI→gateway→Tessera→DB chain
+# offline / CI (no repo access): python bootstrap.py --skip-clone
+# add another repo on your path:  python bootstrap.py --repos edfx_entity_api
 ```
+
+`bootstrap.py` is idempotent (re-run to top up). Branches matter — `edfx-api` is `master`,
+the rest `main` (see REPOS.md). Manual equivalent: `python -m venv .venv`, install
+`requirements.txt`, then `git clone --depth 1 --branch <b> …` each repo into `.workspace/edfx-flow/`.
 
 ### One command — trace where an endpoint gets its data
 ```bash
@@ -71,6 +70,7 @@ projects/      sample project.json inputs (edfx-flow.json)
 tests/         74 tests (offline; real repos validated separately)
 docs/          design spec + docs/plans/ (how each capability was built)
 REPOS.md       the 21-repo EDFX fleet, languages, default branches
+bootstrap.py   one-step setup (venv + deps + clone chain)
 flow.py        one-command tracer    serve_demo.py / claude_demo.py   demo entrypoints
 ```
 
