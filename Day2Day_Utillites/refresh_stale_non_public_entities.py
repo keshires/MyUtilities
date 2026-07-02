@@ -17,8 +17,12 @@ Supports two entity modes (``--entity-type``):
 
     Payload: ``{"type": "non-public", "force": true, "entities": [...]}``
 
-Both queries exclude tenant ``0014000000NXtS8`` and use ``updated_date <`` first of
-current month (override with ``--date-filter``).
+Both queries exclude tenant ``0014000000NXtS8`` and compare a stale-date column
+against the first of the current month (override the cutoff with ``--date-filter``).
+
+The compared column is selectable with ``--stale-date-column`` (or the
+``STALE_REFRESH_STALE_DATE_COLUMN`` env var): ``updated_date`` (default) or
+``pd_last_known_date``. In both cases a NULL value counts as stale.
 
 Monthly run:
   python refresh_stale_non_public_entities.py --entity-type custom --dry-run
@@ -36,6 +40,7 @@ import json
 import logging
 import math
 import os
+import random
 import sys
 import threading
 import time
@@ -69,6 +74,12 @@ REQUEST_TIMEOUT = 120
 SHOW_PROGRESS_EVERY = 10
 CURSOR_PREFETCH = 60000
 
+DEFAULT_MAX_RETRIES = 4  # retry attempts after the first try, for 5xx/429/network errors
+RETRY_BACKOFF_BASE_SECONDS = 2.0
+RETRY_BACKOFF_MAX_SECONDS = 30.0
+# Transient server / rate-limit statuses worth retrying with backoff.
+RETRYABLE_STATUS_CODES = frozenset({429, 500, 502, 503, 504})
+
 POSTGRES_ENV_KEYS = (
     "TESSERA_POSTGRES_HOST",
     "TESSERA_POSTGRES_DB",
@@ -97,11 +108,36 @@ WHERE data_type = 'Private'
   {date_clause}
 """
 
-DATE_CLAUSE_STALE = """AND (
-        updated_date IS NULL
-        OR updated_date < $1::timestamp
-      )"""
+STALE_DATE_COLUMNS = ("updated_date", "pd_last_known_date")
+DEFAULT_STALE_DATE_COLUMN = "updated_date"
 DATE_CLAUSE_ALL = ""
+
+
+def stale_date_clause(column: str) -> str:
+    """Build the stale-date WHERE clause for the chosen column.
+
+    ``column`` must come from :data:`STALE_DATE_COLUMNS`; it is validated by
+    :func:`resolve_stale_date_column` before it reaches here, so interpolating
+    it into the SQL is safe.
+    """
+    return (
+        f"AND (\n"
+        f"        {column} IS NULL\n"
+        f"        OR {column} < $1::timestamp\n"
+        f"      )"
+    )
+
+
+def resolve_stale_date_column(raw: str | None) -> str:
+    key = (raw or "").strip().lower()
+    if not key:
+        return DEFAULT_STALE_DATE_COLUMN
+    if key not in STALE_DATE_COLUMNS:
+        valid = ", ".join(STALE_DATE_COLUMNS)
+        raise SystemExit(
+            f"Invalid --stale-date-column {raw!r}. Choose one of: {valid}"
+        )
+    return key
 
 TENANT_CLAUSE_EXCLUDE = "tenant_id <> ALL($2::text[])"
 TENANT_CLAUSE_INCLUDE = "tenant_id = $2::text"
@@ -150,22 +186,30 @@ def tenant_clause(*, tenant_id: str | None, include_all: bool = False) -> str:
 
 
 def stale_entities_query(
-    mode: EntityRefreshMode, *, tenant_id: str | None = None, include_all: bool = False
+    mode: EntityRefreshMode,
+    *,
+    tenant_id: str | None = None,
+    include_all: bool = False,
+    stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
 ) -> str:
     return STALE_ENTITIES_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
-        date_clause=DATE_CLAUSE_ALL if include_all else DATE_CLAUSE_STALE,
+        date_clause=DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column),
     )
 
 
 def stale_entities_count_query(
-    mode: EntityRefreshMode, *, tenant_id: str | None = None, include_all: bool = False
+    mode: EntityRefreshMode,
+    *,
+    tenant_id: str | None = None,
+    include_all: bool = False,
+    stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
 ) -> str:
     return STALE_ENTITIES_COUNT_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
-        date_clause=DATE_CLAUSE_ALL if include_all else DATE_CLAUSE_STALE,
+        date_clause=DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column),
     )
 
 
@@ -325,11 +369,17 @@ async def count_stale_external_ids(
     excluded_tenants: list[str],
     tenant_id: str | None,
     include_all: bool,
+    stale_date_column: str,
 ) -> int:
     conn = await pg_connect()
     try:
         tenant_param = tenant_id if tenant_id else excluded_tenants
-        query = stale_entities_count_query(mode, tenant_id=tenant_id, include_all=include_all)
+        query = stale_entities_count_query(
+            mode,
+            tenant_id=tenant_id,
+            include_all=include_all,
+            stale_date_column=stale_date_column,
+        )
         if include_all:
             value = await conn.fetchval(query, tenant_param)
         else:
@@ -350,6 +400,7 @@ async def iter_stale_batches(
     excluded_tenants: list[str],
     tenant_id: str | None,
     include_all: bool,
+    stale_date_column: str,
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
@@ -361,7 +412,12 @@ async def iter_stale_batches(
     batch_num = 0
     current: list[str] = []
     seen = 0
-    query = stale_entities_query(mode, tenant_id=tenant_id, include_all=include_all)
+    query = stale_entities_query(
+        mode,
+        tenant_id=tenant_id,
+        include_all=include_all,
+        stale_date_column=stale_date_column,
+    )
 
     try:
         async with conn.transaction():
@@ -483,6 +539,13 @@ def build_payload(entities: list[str], payload_type: str) -> dict[str, object]:
     }
 
 
+def retry_backoff_seconds(retry_index: int) -> float:
+    """Exponential backoff (base * 2^(n-1)), capped, with up to 25% jitter."""
+    delay = RETRY_BACKOFF_BASE_SECONDS * (2 ** max(0, retry_index - 1))
+    delay = min(delay, RETRY_BACKOFF_MAX_SECONDS)
+    return delay + random.uniform(0, delay * 0.25)
+
+
 def submit_refresh_batch(
     *,
     session: requests.Session | None,
@@ -495,6 +558,7 @@ def submit_refresh_batch(
     logger: logging.Logger,
     dry_run: bool,
     verbose: bool,
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> tuple[int, bool, int, str]:
     url = f"{base_url}/tesseraui/v1/refreshEntities"
     payload = build_payload(entities, payload_type)
@@ -510,8 +574,15 @@ def submit_refresh_batch(
             )
         return batch_num, True, 0, "dry-run"
 
-    for attempt in (1, 2):
-        token = token_manager.get_token(force_refresh=(attempt == 2))
+    retries_used = 0  # backoff retries consumed (5xx / 429 / network)
+    token_refresh_used = False  # 401 token refresh (one-shot, not a backoff retry)
+    force_token_refresh = False
+    attempt_no = 0
+
+    while True:
+        attempt_no += 1
+        token = token_manager.get_token(force_refresh=force_token_refresh)
+        force_token_refresh = False
         headers = {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
@@ -523,7 +594,7 @@ def submit_refresh_batch(
                 batch_num,
                 total_batches,
                 len(entities),
-                attempt,
+                attempt_no,
             )
         try:
             http = session if session is not None else _get_thread_session()
@@ -535,19 +606,58 @@ def submit_refresh_batch(
                 timeout=REQUEST_TIMEOUT,
             )
         except requests.RequestException as exc:
+            if retries_used < max_retries:
+                retries_used += 1
+                delay = retry_backoff_seconds(retries_used)
+                logger.warning(
+                    "Batch %s/%s request error (%s) — retry %s/%s in %.1fs",
+                    batch_num,
+                    total_batches,
+                    exc,
+                    retries_used,
+                    max_retries,
+                    delay,
+                )
+                time.sleep(delay)
+                continue
             logger.error(
-                "Batch %s/%s request failed: %s", batch_num, total_batches, exc
+                "Batch %s/%s request failed after %s retries: %s",
+                batch_num,
+                total_batches,
+                max_retries,
+                exc,
             )
             return batch_num, False, 0, str(exc)
 
         body_preview = (response.text or "")[:1000]
-        if response.status_code == 401 and attempt == 1:
+        status = response.status_code
+
+        # 401 → refresh token once and retry immediately (not a backoff retry).
+        if status == 401 and not token_refresh_used:
+            token_refresh_used = True
+            force_token_refresh = True
             logger.warning(
                 "Batch %s/%s HTTP 401 — refreshing token and retrying",
                 batch_num,
                 total_batches,
             )
             token_manager.invalidate()
+            continue
+
+        # Transient server / rate-limit errors → backoff retry while budget remains.
+        if status in RETRYABLE_STATUS_CODES and retries_used < max_retries:
+            retries_used += 1
+            delay = retry_backoff_seconds(retries_used)
+            logger.warning(
+                "Batch %s/%s HTTP %s — retry %s/%s in %.1fs",
+                batch_num,
+                total_batches,
+                status,
+                retries_used,
+                max_retries,
+                delay,
+            )
+            time.sleep(delay)
             continue
 
         ok = response.ok
@@ -557,20 +667,19 @@ def submit_refresh_batch(
                     "Batch %s/%s succeeded: HTTP %s — %s",
                     batch_num,
                     total_batches,
-                    response.status_code,
+                    status,
                     body_preview,
                 )
         else:
             logger.error(
-                "Batch %s/%s failed: HTTP %s — %s",
+                "Batch %s/%s failed: HTTP %s (after %s retries) — %s",
                 batch_num,
                 total_batches,
-                response.status_code,
+                status,
+                retries_used,
                 body_preview,
             )
-        return batch_num, ok, response.status_code, body_preview
-
-    return batch_num, False, 401, "Unauthorized after token refresh"
+        return batch_num, ok, status, body_preview
 
 
 def log_progress(
@@ -603,6 +712,7 @@ async def process_batches(
     excluded_tenants: list[str],
     tenant_id: str | None,
     include_all: bool,
+    stale_date_column: str,
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
@@ -613,6 +723,7 @@ async def process_batches(
     token_manager: TokenManager,
     base_url: str,
     logger: logging.Logger,
+    max_retries: int = DEFAULT_MAX_RETRIES,
 ) -> tuple[int, int, int, list[dict[str, object]]]:
     ok_count = 0
     fail_count = 0
@@ -628,6 +739,7 @@ async def process_batches(
             excluded_tenants=excluded_tenants,
             tenant_id=tenant_id,
             include_all=include_all,
+            stale_date_column=stale_date_column,
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
@@ -651,6 +763,7 @@ async def process_batches(
                 logger=logger,
                 dry_run=dry_run,
                 verbose=verbose,
+                max_retries=max_retries,
             )
             completed += 1
             if ok:
@@ -687,6 +800,7 @@ async def process_batches(
             excluded_tenants=excluded_tenants,
             tenant_id=tenant_id,
             include_all=include_all,
+            stale_date_column=stale_date_column,
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
@@ -710,6 +824,7 @@ async def process_batches(
                 logger=logger,
                 dry_run=dry_run,
                 verbose=False,
+                max_retries=max_retries,
             )
             in_flight[future] = (batch_num, len(entities))
 
@@ -800,6 +915,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Stale cutoff date (YYYY-MM-DD). Default: first day of current month.",
     )
     parser.add_argument(
+        "--stale-date-column",
+        type=str,
+        default=None,
+        choices=STALE_DATE_COLUMNS,
+        help=(
+            "Column compared against the stale cutoff. "
+            f"Choices: {', '.join(STALE_DATE_COLUMNS)}. "
+            "Default: STALE_REFRESH_STALE_DATE_COLUMN or "
+            f"'{DEFAULT_STALE_DATE_COLUMN}'."
+        ),
+    )
+    parser.add_argument(
         "--batch-size",
         type=int,
         default=int(os.getenv("STALE_REFRESH_BATCH_SIZE", str(DEFAULT_BATCH_SIZE))),
@@ -827,6 +954,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--max-retries",
+        type=int,
+        default=int(os.getenv("STALE_REFRESH_MAX_RETRIES", str(DEFAULT_MAX_RETRIES))),
+        help=(
+            "Retry attempts (with exponential backoff) per batch on HTTP "
+            f"{sorted(RETRYABLE_STATUS_CODES)} or network errors "
+            f"(default: {DEFAULT_MAX_RETRIES}). Use 0 to disable retries."
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Query DB and log batches without calling refreshEntities.",
@@ -849,6 +986,9 @@ def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     entity_type_raw = args.entity_type or _env("STALE_REFRESH_ENTITY_TYPE", "private")
     entity_mode = resolve_entity_mode(entity_type_raw)
+    stale_date_column = resolve_stale_date_column(
+        args.stale_date_column or _env("STALE_REFRESH_STALE_DATE_COLUMN")
+    )
     if args.resume_from_batch < 1:
         raise SystemExit("--resume-from-batch must be >= 1")
 
@@ -864,7 +1004,16 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Run started")
     logger.info("Entity type: %s (payload type=%s)", entity_mode.name, entity_mode.payload_type)
     logger.info("Log file: %s", log_path)
-    logger.info("SQL query:\n%s", stale_entities_query(entity_mode, tenant_id=tenant_id, include_all=args.all_entities))
+    logger.info("Stale date column: %s", stale_date_column)
+    logger.info(
+        "SQL query:\n%s",
+        stale_entities_query(
+            entity_mode,
+            tenant_id=tenant_id,
+            include_all=args.all_entities,
+            stale_date_column=stale_date_column,
+        ),
+    )
 
     missing = missing_postgres_env()
     if missing:
@@ -880,8 +1029,9 @@ def main(argv: list[str] | None = None) -> int:
     base_url = tessera_base_url()
     batch_size = max(1, args.batch_size)
     workers = 1 if args.dry_run else max(1, args.workers)
+    max_retries = max(0, args.max_retries)
 
-    logger.info("Date filter (updated_date <): %s", date_filter.isoformat())
+    logger.info("Stale cutoff (%s <): %s", stale_date_column, date_filter.isoformat())
     if args.all_entities:
         logger.info("Including all entities (ignoring stale date filter)")
     if tenant_id:
@@ -891,6 +1041,11 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Tessera base URL: %s", base_url)
     logger.info("Batch size: %s", batch_size)
     logger.info("Parallel workers: %s", workers)
+    logger.info(
+        "Max retries per batch: %s (statuses %s + network errors)",
+        max_retries,
+        sorted(RETRYABLE_STATUS_CODES),
+    )
     if args.dry_run:
         logger.info("Dry run enabled — no API submissions")
 
@@ -902,6 +1057,7 @@ def main(argv: list[str] | None = None) -> int:
                 excluded_tenants=excluded,
                 tenant_id=tenant_id,
                 include_all=args.all_entities,
+                stale_date_column=stale_date_column,
             )
         )
     except Exception as exc:
@@ -968,6 +1124,7 @@ def main(argv: list[str] | None = None) -> int:
                 excluded_tenants=excluded,
                 tenant_id=tenant_id,
                 include_all=args.all_entities,
+                stale_date_column=stale_date_column,
                 batch_size=batch_size,
                 limit=args.limit,
                 resume_from_batch=args.resume_from_batch,
@@ -978,6 +1135,7 @@ def main(argv: list[str] | None = None) -> int:
                 token_manager=token_manager,
                 base_url=base_url,
                 logger=logger,
+                max_retries=max_retries,
             )
         )
     except Exception as exc:
@@ -990,11 +1148,13 @@ def main(argv: list[str] | None = None) -> int:
         "payload_type": entity_mode.payload_type,
         "tenant_id": tenant_id,
         "include_all_entities": args.all_entities,
+        "stale_date_column": stale_date_column,
         "date_filter": date_filter.isoformat(),
         "stale_entities_found": total_found,
         "entities_to_submit": entities_to_submit,
         "total_batches": total_batches,
         "workers": workers,
+        "max_retries": max_retries,
         "batches_skipped": skipped_count,
         "resume_from_batch": args.resume_from_batch,
         "batches_ok": ok_count,
