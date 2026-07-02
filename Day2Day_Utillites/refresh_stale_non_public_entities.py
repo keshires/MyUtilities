@@ -82,11 +82,8 @@ FROM public.entity
 WHERE data_type = 'Private'
   AND {custom_id_clause}
   AND external_id IS NOT NULL
-  AND tenant_id <> ALL($2::text[])
-  AND (
-        updated_date IS NULL
-        OR updated_date < $1::timestamp
-      )
+  AND {tenant_clause}
+  {date_clause}
 ORDER BY external_id
 """
 
@@ -96,12 +93,20 @@ FROM public.entity
 WHERE data_type = 'Private'
   AND {custom_id_clause}
   AND external_id IS NOT NULL
-  AND tenant_id <> ALL($2::text[])
-  AND (
+  AND {tenant_clause}
+  {date_clause}
+"""
+
+DATE_CLAUSE_STALE = """AND (
         updated_date IS NULL
         OR updated_date < $1::timestamp
-      )
-"""
+      )"""
+DATE_CLAUSE_ALL = ""
+
+TENANT_CLAUSE_EXCLUDE = "tenant_id <> ALL($2::text[])"
+TENANT_CLAUSE_INCLUDE = "tenant_id = $2::text"
+TENANT_CLAUSE_EXCLUDE_ALL = "tenant_id <> ALL($1::text[])"
+TENANT_CLAUSE_INCLUDE_ALL = "tenant_id = $1::text"
 
 
 @dataclass(frozen=True)
@@ -138,12 +143,30 @@ def resolve_entity_mode(raw: str) -> EntityRefreshMode:
     return ENTITY_MODES[key]
 
 
-def stale_entities_query(mode: EntityRefreshMode) -> str:
-    return STALE_ENTITIES_QUERY_BASE.format(custom_id_clause=mode.custom_id_clause)
+def tenant_clause(*, tenant_id: str | None, include_all: bool = False) -> str:
+    if tenant_id:
+        return TENANT_CLAUSE_INCLUDE_ALL if include_all else TENANT_CLAUSE_INCLUDE
+    return TENANT_CLAUSE_EXCLUDE_ALL if include_all else TENANT_CLAUSE_EXCLUDE
 
 
-def stale_entities_count_query(mode: EntityRefreshMode) -> str:
-    return STALE_ENTITIES_COUNT_QUERY_BASE.format(custom_id_clause=mode.custom_id_clause)
+def stale_entities_query(
+    mode: EntityRefreshMode, *, tenant_id: str | None = None, include_all: bool = False
+) -> str:
+    return STALE_ENTITIES_QUERY_BASE.format(
+        custom_id_clause=mode.custom_id_clause,
+        tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
+        date_clause=DATE_CLAUSE_ALL if include_all else DATE_CLAUSE_STALE,
+    )
+
+
+def stale_entities_count_query(
+    mode: EntityRefreshMode, *, tenant_id: str | None = None, include_all: bool = False
+) -> str:
+    return STALE_ENTITIES_COUNT_QUERY_BASE.format(
+        custom_id_clause=mode.custom_id_clause,
+        tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
+        date_clause=DATE_CLAUSE_ALL if include_all else DATE_CLAUSE_STALE,
+    )
 
 
 def _env(name: str, default: str = "") -> str:
@@ -300,14 +323,21 @@ async def count_stale_external_ids(
     mode: EntityRefreshMode,
     date_filter: date,
     excluded_tenants: list[str],
+    tenant_id: str | None,
+    include_all: bool,
 ) -> int:
     conn = await pg_connect()
     try:
-        value = await conn.fetchval(
-            stale_entities_count_query(mode),
-            datetime.combine(date_filter, datetime.min.time()),
-            excluded_tenants,
-        )
+        tenant_param = tenant_id if tenant_id else excluded_tenants
+        query = stale_entities_count_query(mode, tenant_id=tenant_id, include_all=include_all)
+        if include_all:
+            value = await conn.fetchval(query, tenant_param)
+        else:
+            value = await conn.fetchval(
+                query,
+                datetime.combine(date_filter, datetime.min.time()),
+                tenant_param,
+            )
         return int(value or 0)
     finally:
         await conn.close()
@@ -318,6 +348,8 @@ async def iter_stale_batches(
     mode: EntityRefreshMode,
     date_filter: date,
     excluded_tenants: list[str],
+    tenant_id: str | None,
+    include_all: bool,
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
@@ -325,18 +357,27 @@ async def iter_stale_batches(
     """Stream entity ids from Postgres in submission-sized batches."""
     conn = await pg_connect()
     cutoff = datetime.combine(date_filter, datetime.min.time())
+    tenant_param = tenant_id if tenant_id else excluded_tenants
     batch_num = 0
     current: list[str] = []
     seen = 0
+    query = stale_entities_query(mode, tenant_id=tenant_id, include_all=include_all)
 
     try:
         async with conn.transaction():
-            cursor = conn.cursor(
-                stale_entities_query(mode),
-                cutoff,
-                excluded_tenants,
-                prefetch=min(CURSOR_PREFETCH, max(batch_size * 4, batch_size)),
-            )
+            if include_all:
+                cursor = conn.cursor(
+                    query,
+                    tenant_param,
+                    prefetch=min(CURSOR_PREFETCH, max(batch_size * 4, batch_size)),
+                )
+            else:
+                cursor = conn.cursor(
+                    query,
+                    cutoff,
+                    tenant_param,
+                    prefetch=min(CURSOR_PREFETCH, max(batch_size * 4, batch_size)),
+                )
             async for row in cursor:
                 external_id = row["external_id"]
                 if external_id is None:
@@ -560,6 +601,8 @@ async def process_batches(
     mode: EntityRefreshMode,
     date_filter: date,
     excluded_tenants: list[str],
+    tenant_id: str | None,
+    include_all: bool,
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
@@ -583,6 +626,8 @@ async def process_batches(
             mode=mode,
             date_filter=date_filter,
             excluded_tenants=excluded_tenants,
+            tenant_id=tenant_id,
+            include_all=include_all,
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
@@ -640,6 +685,8 @@ async def process_batches(
             mode=mode,
             date_filter=date_filter,
             excluded_tenants=excluded_tenants,
+            tenant_id=tenant_id,
+            include_all=include_all,
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
@@ -784,6 +831,17 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="store_true",
         help="Query DB and log batches without calling refreshEntities.",
     )
+    parser.add_argument(
+        "--tenant-id",
+        type=str,
+        default=None,
+        help="Restrict refresh to a single tenant_id (overrides tenant exclusion).",
+    )
+    parser.add_argument(
+        "--all-entities",
+        action="store_true",
+        help="Include all matching entities, not only those stale by --date-filter.",
+    )
     return parser.parse_args(argv)
 
 
@@ -801,10 +859,12 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger = setup_logging(log_path)
 
+    tenant_id = (args.tenant_id or "").strip() or None
+
     logger.info("Run started")
     logger.info("Entity type: %s (payload type=%s)", entity_mode.name, entity_mode.payload_type)
     logger.info("Log file: %s", log_path)
-    logger.info("SQL query:\n%s", stale_entities_query(entity_mode))
+    logger.info("SQL query:\n%s", stale_entities_query(entity_mode, tenant_id=tenant_id, include_all=args.all_entities))
 
     missing = missing_postgres_env()
     if missing:
@@ -822,7 +882,12 @@ def main(argv: list[str] | None = None) -> int:
     workers = 1 if args.dry_run else max(1, args.workers)
 
     logger.info("Date filter (updated_date <): %s", date_filter.isoformat())
-    logger.info("Excluded tenant_id values: %s", excluded)
+    if args.all_entities:
+        logger.info("Including all entities (ignoring stale date filter)")
+    if tenant_id:
+        logger.info("Tenant filter: %s", tenant_id)
+    else:
+        logger.info("Excluded tenant_id values: %s", excluded)
     logger.info("Tessera base URL: %s", base_url)
     logger.info("Batch size: %s", batch_size)
     logger.info("Parallel workers: %s", workers)
@@ -835,6 +900,8 @@ def main(argv: list[str] | None = None) -> int:
                 mode=entity_mode,
                 date_filter=date_filter,
                 excluded_tenants=excluded,
+                tenant_id=tenant_id,
+                include_all=args.all_entities,
             )
         )
     except Exception as exc:
@@ -899,6 +966,8 @@ def main(argv: list[str] | None = None) -> int:
                 mode=entity_mode,
                 date_filter=date_filter,
                 excluded_tenants=excluded,
+                tenant_id=tenant_id,
+                include_all=args.all_entities,
                 batch_size=batch_size,
                 limit=args.limit,
                 resume_from_batch=args.resume_from_batch,
@@ -919,6 +988,8 @@ def main(argv: list[str] | None = None) -> int:
     summary = {
         "entity_type": entity_mode.name,
         "payload_type": entity_mode.payload_type,
+        "tenant_id": tenant_id,
+        "include_all_entities": args.all_entities,
         "date_filter": date_filter.isoformat(),
         "stale_entities_found": total_found,
         "entities_to_submit": entities_to_submit,
