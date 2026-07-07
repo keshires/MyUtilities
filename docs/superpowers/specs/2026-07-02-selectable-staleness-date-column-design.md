@@ -78,3 +78,28 @@ resilience to `submit_refresh_batch`:
 - `max_retries` threaded through `process_batches`; logged at startup and
   recorded in the run-summary JSON.
 
+## Addendum (2026-07-07): financialStmtDate business filter
+
+An experiment (submitting the top-10 stale custom entities individually) showed
+that even one-per-request refreshes advanced `pd_last_known_date` for only 1/10,
+while `updated_date` moved for all 10. Root cause: `pd_last_known_date` can only
+advance to the latest month the model can compute a PD for, which is gated by the
+entity's latest financial statement. Entities whose `financialStmtDate` is older
+than ~3 years cannot advance regardless of how often they are refreshed.
+
+Business rule adopted: **do not refresh an entity whose `financialStmtDate` is
+older than N years** (default 3). Impact on the custom stale set (pd column):
+123,986 → 9,318 (≈92% were data-limited).
+
+- New clause `financial_stmt_clause(max_age_years)` — keeps rows where
+  `financialStmtDate` is NULL/empty or `>= NOW() - INTERVAL 'N years'`; `0`
+  disables. Added to both count and select query bases.
+- New `--financial-max-age-years N` (env `STALE_REFRESH_FINANCIAL_MAX_AGE_YEARS`,
+  default 3) in the refresh script, threaded through count/iter/process, logged
+  and recorded in the summary. Applies to both `custom` and `private`.
+- The same filter and a matching `--stale-date-column` option were added to
+  `test_single_entity_refresh.py` (single-request experiment, now supports
+  `--entity-type`) and `validate_stale_entities.py` (reconciliation export, which
+  also now emits a `pd_last_known_date` column) so all three tools select the
+  same population.
+

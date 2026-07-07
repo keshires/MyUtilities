@@ -24,6 +24,11 @@ The compared column is selectable with ``--stale-date-column`` (or the
 ``STALE_REFRESH_STALE_DATE_COLUMN`` env var): ``updated_date`` (default) or
 ``pd_last_known_date``. In both cases a NULL value counts as stale.
 
+Entities whose latest ``financialStmtDate`` is older than
+``--financial-max-age-years`` (default 3; env ``STALE_REFRESH_FINANCIAL_MAX_AGE_YEARS``)
+are excluded — their PD cannot advance, so refreshing them is wasted work.
+A missing/empty ``financialStmtDate`` is kept. Pass ``0`` to disable the filter.
+
 Monthly run:
   python refresh_stale_non_public_entities.py --entity-type custom --dry-run
   python refresh_stale_non_public_entities.py --entity-type private --dry-run
@@ -94,6 +99,7 @@ WHERE data_type = 'Private'
   AND {custom_id_clause}
   AND external_id IS NOT NULL
   AND {tenant_clause}
+  {financial_clause}
   {date_clause}
 ORDER BY external_id
 """
@@ -105,12 +111,17 @@ WHERE data_type = 'Private'
   AND {custom_id_clause}
   AND external_id IS NOT NULL
   AND {tenant_clause}
+  {financial_clause}
   {date_clause}
 """
 
 STALE_DATE_COLUMNS = ("updated_date", "pd_last_known_date")
 DEFAULT_STALE_DATE_COLUMN = "updated_date"
 DATE_CLAUSE_ALL = ""
+
+# Business rule: an entity is not worth refreshing if its latest financial
+# statement is older than this many years — its PD cannot advance regardless.
+DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS = 3
 
 
 def stale_date_clause(column: str) -> str:
@@ -125,6 +136,24 @@ def stale_date_clause(column: str) -> str:
         f"        {column} IS NULL\n"
         f"        OR {column} < $1::timestamp\n"
         f"      )"
+    )
+
+
+def financial_stmt_clause(max_age_years: int) -> str:
+    """Restrict to entities whose financialStmtDate is missing or within
+    ``max_age_years`` of now. ``max_age_years <= 0`` disables the filter.
+
+    ``max_age_years`` is an int (validated by argparse), so formatting it into
+    the SQL interval literal is safe.
+    """
+    if max_age_years <= 0:
+        return ""
+    return (
+        "AND (\n"
+        "        NULLIF(entity_data ->> 'financialStmtDate', '') IS NULL\n"
+        "        OR NULLIF(entity_data ->> 'financialStmtDate', '')::timestamp"
+        f" >= (NOW() - INTERVAL '{max_age_years} years')\n"
+        "      )"
     )
 
 
@@ -191,10 +220,12 @@ def stale_entities_query(
     tenant_id: str | None = None,
     include_all: bool = False,
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
+    financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
     return STALE_ENTITIES_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
+        financial_clause=financial_stmt_clause(financial_max_age_years),
         date_clause=DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column),
     )
 
@@ -205,10 +236,12 @@ def stale_entities_count_query(
     tenant_id: str | None = None,
     include_all: bool = False,
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
+    financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
     return STALE_ENTITIES_COUNT_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
+        financial_clause=financial_stmt_clause(financial_max_age_years),
         date_clause=DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column),
     )
 
@@ -370,6 +403,7 @@ async def count_stale_external_ids(
     tenant_id: str | None,
     include_all: bool,
     stale_date_column: str,
+    financial_max_age_years: int,
 ) -> int:
     conn = await pg_connect()
     try:
@@ -379,6 +413,7 @@ async def count_stale_external_ids(
             tenant_id=tenant_id,
             include_all=include_all,
             stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
         )
         if include_all:
             value = await conn.fetchval(query, tenant_param)
@@ -401,6 +436,7 @@ async def iter_stale_batches(
     tenant_id: str | None,
     include_all: bool,
     stale_date_column: str,
+    financial_max_age_years: int,
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
@@ -417,6 +453,7 @@ async def iter_stale_batches(
         tenant_id=tenant_id,
         include_all=include_all,
         stale_date_column=stale_date_column,
+        financial_max_age_years=financial_max_age_years,
     )
 
     try:
@@ -713,6 +750,7 @@ async def process_batches(
     tenant_id: str | None,
     include_all: bool,
     stale_date_column: str,
+    financial_max_age_years: int,
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
@@ -740,6 +778,7 @@ async def process_batches(
             tenant_id=tenant_id,
             include_all=include_all,
             stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
@@ -801,6 +840,7 @@ async def process_batches(
             tenant_id=tenant_id,
             include_all=include_all,
             stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
@@ -954,6 +994,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--financial-max-age-years",
+        type=int,
+        default=int(
+            os.getenv(
+                "STALE_REFRESH_FINANCIAL_MAX_AGE_YEARS",
+                str(DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS),
+            )
+        ),
+        help=(
+            "Only refresh entities whose financialStmtDate is missing or within "
+            f"this many years of now (default: {DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS}). "
+            "Use 0 to disable this filter."
+        ),
+    )
+    parser.add_argument(
         "--max-retries",
         type=int,
         default=int(os.getenv("STALE_REFRESH_MAX_RETRIES", str(DEFAULT_MAX_RETRIES))),
@@ -1004,7 +1059,12 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Run started")
     logger.info("Entity type: %s (payload type=%s)", entity_mode.name, entity_mode.payload_type)
     logger.info("Log file: %s", log_path)
+    financial_max_age_years = max(0, args.financial_max_age_years)
     logger.info("Stale date column: %s", stale_date_column)
+    logger.info(
+        "Financial statement max age: %s",
+        f"{financial_max_age_years} years" if financial_max_age_years > 0 else "disabled",
+    )
     logger.info(
         "SQL query:\n%s",
         stale_entities_query(
@@ -1012,6 +1072,7 @@ def main(argv: list[str] | None = None) -> int:
             tenant_id=tenant_id,
             include_all=args.all_entities,
             stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
         ),
     )
 
@@ -1058,6 +1119,7 @@ def main(argv: list[str] | None = None) -> int:
                 tenant_id=tenant_id,
                 include_all=args.all_entities,
                 stale_date_column=stale_date_column,
+                financial_max_age_years=financial_max_age_years,
             )
         )
     except Exception as exc:
@@ -1125,6 +1187,7 @@ def main(argv: list[str] | None = None) -> int:
                 tenant_id=tenant_id,
                 include_all=args.all_entities,
                 stale_date_column=stale_date_column,
+                financial_max_age_years=financial_max_age_years,
                 batch_size=batch_size,
                 limit=args.limit,
                 resume_from_batch=args.resume_from_batch,
@@ -1149,6 +1212,7 @@ def main(argv: list[str] | None = None) -> int:
         "tenant_id": tenant_id,
         "include_all_entities": args.all_entities,
         "stale_date_column": stale_date_column,
+        "financial_max_age_years": financial_max_age_years,
         "date_filter": date_filter.isoformat(),
         "stale_entities_found": total_found,
         "entities_to_submit": entities_to_submit,

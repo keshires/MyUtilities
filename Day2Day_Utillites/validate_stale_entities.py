@@ -12,8 +12,13 @@ Two entity modes (``--entity-type``), mirroring the refresh script:
 **private** — ``custom_id IS NULL`` (default)
 
 Both keep ``data_type = 'Private'``, exclude tenant ``0014000000NXtS8``, and treat a
-row as stale when ``updated_date IS NULL OR updated_date < first of current month``
-(override with ``--date-filter``; ignore with ``--all-entities``).
+row as stale when the chosen ``--stale-date-column`` (``updated_date`` default or
+``pd_last_known_date``) is NULL or ``< first of current month`` (override with
+``--date-filter``; ignore with ``--all-entities``).
+
+Entities whose ``financialStmtDate`` is older than ``--financial-max-age-years``
+(default 3; ``0`` disables) are excluded — matching the refresh script so both
+tools operate on the same population.
 
 Examples:
   python validate_stale_entities.py --entity-type custom
@@ -59,6 +64,35 @@ CUSTOM_ID_CLAUSE = {
     "private": "custom_id IS NULL",
 }
 
+# Kept in sync with refresh_stale_non_public_entities.py.
+STALE_DATE_COLUMNS = ("updated_date", "pd_last_known_date")
+DEFAULT_STALE_DATE_COLUMN = "updated_date"
+DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS = 3
+
+
+def resolve_stale_date_column(raw: str | None) -> str:
+    key = (raw or "").strip().lower()
+    if not key:
+        return DEFAULT_STALE_DATE_COLUMN
+    if key not in STALE_DATE_COLUMNS:
+        valid = ", ".join(STALE_DATE_COLUMNS)
+        raise SystemExit(f"Invalid --stale-date-column {raw!r}. Choose one of: {valid}")
+    return key
+
+
+def financial_stmt_clause(max_age_years: int) -> str:
+    """financialStmtDate gate; ``max_age_years <= 0`` disables it. Mirrors the
+    refresh script so both tools select the same population."""
+    if max_age_years <= 0:
+        return ""
+    return (
+        "AND (\n"
+        "        NULLIF(entity_data ->> 'financialStmtDate', '') IS NULL\n"
+        "        OR NULLIF(entity_data ->> 'financialStmtDate', '')::timestamp"
+        f" >= (NOW() - INTERVAL '{max_age_years} years')\n"
+        "      )"
+    )
+
 # Fixed top-level keys of entity_data, confirmed against production. Any key not
 # listed here is preserved in the attributes_extra_json overflow column.
 ENTITY_DATA_KEYS = [
@@ -101,6 +135,7 @@ CORE_COLUMNS = [
     "tenant_id",
     "custom_id",
     "updated_date",
+    "pd_last_known_date",
     "as_of_date",
     "days_since_updated",
 ]
@@ -168,7 +203,12 @@ async def pg_connect() -> asyncpg.Connection:
 
 
 def build_query(
-    entity_type: str, *, tenant_id: str | None, include_all: bool
+    entity_type: str,
+    *,
+    tenant_id: str | None,
+    include_all: bool,
+    stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
+    financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
     """Same WHERE clause as the refresh script's stale query, per-row detail."""
     custom_clause = CUSTOM_ID_CLAUSE[entity_type]
@@ -177,18 +217,22 @@ def build_query(
         date_clause = ""
     else:
         tenant_ph = "$2"
-        date_clause = "AND (updated_date IS NULL OR updated_date < $1::timestamp)"
+        date_clause = (
+            f"AND ({stale_date_column} IS NULL OR {stale_date_column} < $1::timestamp)"
+        )
     if tenant_id:
         tenant_clause = f"tenant_id = {tenant_ph}::text"
     else:
         tenant_clause = f"tenant_id <> ALL({tenant_ph}::text[])"
+    fin_clause = financial_stmt_clause(financial_max_age_years)
     return f"""
-SELECT external_id, name, tenant_id, custom_id, updated_date, as_of_date, entity_data
+SELECT external_id, name, tenant_id, custom_id, updated_date, pd_last_known_date, as_of_date, entity_data
 FROM public.entity
 WHERE data_type = 'Private'
   AND {custom_clause}
   AND external_id IS NOT NULL
   AND {tenant_clause}
+  {fin_clause}
   {date_clause}
 ORDER BY external_id
 """
@@ -222,6 +266,7 @@ def _parse_entity_data(raw: object) -> dict | None:
 def build_csv_row(record: asyncpg.Record, *, entity_type: str, run_day: date) -> tuple[dict[str, str], bool, bool]:
     """Return (row, entity_data_missing, used_overflow)."""
     updated = record["updated_date"]
+    pd_last_known = record["pd_last_known_date"]
     as_of = record["as_of_date"]
     days_since = ""
     if updated is not None:
@@ -238,6 +283,7 @@ def build_csv_row(record: asyncpg.Record, *, entity_type: str, run_day: date) ->
         "tenant_id": _cell(record["tenant_id"]),
         "custom_id": _cell(record["custom_id"]),
         "updated_date": updated.isoformat() if updated is not None else "",
+        "pd_last_known_date": pd_last_known.isoformat() if pd_last_known is not None else "",
         "as_of_date": as_of.isoformat() if as_of is not None else "",
         "days_since_updated": days_since,
     }
@@ -256,11 +302,19 @@ async def export_reconciliation(
     include_all: bool,
     date_filter: date,
     excluded_tenants: list[str],
+    stale_date_column: str,
+    financial_max_age_years: int,
     limit: int | None,
     out_csv: Path,
     logger: logging.Logger,
 ) -> dict[str, int]:
-    query = build_query(entity_type, tenant_id=tenant_id, include_all=include_all)
+    query = build_query(
+        entity_type,
+        tenant_id=tenant_id,
+        include_all=include_all,
+        stale_date_column=stale_date_column,
+        financial_max_age_years=financial_max_age_years,
+    )
     tenant_param = tenant_id if tenant_id else excluded_tenants
     cutoff = datetime.combine(date_filter, datetime.min.time())
     run_day = date.today()
@@ -325,6 +379,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help="Stale cutoff date (YYYY-MM-DD). Default: first day of current month.",
     )
     parser.add_argument(
+        "--stale-date-column",
+        type=str,
+        default=None,
+        choices=STALE_DATE_COLUMNS,
+        help=(
+            f"Column compared against the stale cutoff. Choices: {', '.join(STALE_DATE_COLUMNS)}. "
+            f"Default: STALE_REFRESH_STALE_DATE_COLUMN or '{DEFAULT_STALE_DATE_COLUMN}'."
+        ),
+    )
+    parser.add_argument(
+        "--financial-max-age-years",
+        type=int,
+        default=int(
+            os.getenv("STALE_REFRESH_FINANCIAL_MAX_AGE_YEARS", str(DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS))
+        ),
+        help=(
+            "Only include entities whose financialStmtDate is missing or within this many "
+            f"years of now (default: {DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS}). Use 0 to disable."
+        ),
+    )
+    parser.add_argument(
         "--all-entities",
         action="store_true",
         help="Include all matching entities, not only those stale by --date-filter.",
@@ -354,6 +429,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     entity_type = resolve_entity_type(args.entity_type)
+    stale_date_column = resolve_stale_date_column(
+        args.stale_date_column or _env("STALE_REFRESH_STALE_DATE_COLUMN")
+    )
+    financial_max_age_years = max(0, args.financial_max_age_years)
 
     run_started = datetime.now(timezone.utc)
     log_path = (
@@ -387,7 +466,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.all_entities:
         logger.info("Including all entities (ignoring stale date filter)")
     else:
-        logger.info("Date filter (updated_date <): %s", date_filter.isoformat())
+        logger.info("Stale cutoff (%s <): %s", stale_date_column, date_filter.isoformat())
+    logger.info(
+        "Financial statement max age: %s",
+        f"{financial_max_age_years} years" if financial_max_age_years > 0 else "disabled",
+    )
     if tenant_id:
         logger.info("Tenant filter: %s", tenant_id)
     else:
@@ -395,7 +478,13 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Output CSV: %s", out_csv)
     logger.info(
         "SQL query:\n%s",
-        build_query(entity_type, tenant_id=tenant_id, include_all=args.all_entities),
+        build_query(
+            entity_type,
+            tenant_id=tenant_id,
+            include_all=args.all_entities,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+        ),
     )
 
     try:
@@ -406,6 +495,8 @@ def main(argv: list[str] | None = None) -> int:
                 include_all=args.all_entities,
                 date_filter=date_filter,
                 excluded_tenants=excluded,
+                stale_date_column=stale_date_column,
+                financial_max_age_years=financial_max_age_years,
                 limit=args.limit,
                 out_csv=out_csv,
                 logger=logger,
@@ -420,6 +511,8 @@ def main(argv: list[str] | None = None) -> int:
         "entity_type": entity_type,
         "tenant_id": tenant_id,
         "include_all_entities": args.all_entities,
+        "stale_date_column": stale_date_column,
+        "financial_max_age_years": financial_max_age_years,
         "date_filter": date_filter.isoformat(),
         "output_csv": str(out_csv),
         **stats,
