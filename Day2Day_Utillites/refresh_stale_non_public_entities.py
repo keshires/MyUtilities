@@ -29,12 +29,24 @@ Entities whose latest ``financialStmtDate`` is older than
 are excluded — their PD cannot advance, so refreshing them is wasted work.
 A missing/empty ``financialStmtDate`` is kept. Pass ``0`` to disable the filter.
 
+Tenant scoping:
+  ``--tenant-id X``  — refresh one tenant (the excluded list still applies).
+  ``--per-tenant``   — iterate every tenant with stale entities (minus excluded),
+                       processing each separately with its own plan and summary.
+  Excluded tenants are never refreshed, even if named.
+
+Submission size:
+  ``--one-per-request`` — send exactly one external_id per refreshEntities call
+  (batch size 1); slower but avoids large-payload failures.
+
 Monthly run:
   python refresh_stale_non_public_entities.py --entity-type custom --dry-run
   python refresh_stale_non_public_entities.py --entity-type private --dry-run
   python refresh_stale_non_public_entities.py --entity-type custom
   python refresh_stale_non_public_entities.py --entity-type private --workers 3
   python refresh_stale_non_public_entities.py --entity-type private --resume-from-batch 44
+  python refresh_stale_non_public_entities.py --entity-type custom --per-tenant
+  python refresh_stale_non_public_entities.py --entity-type custom --one-per-request
 """
 
 from __future__ import annotations
@@ -113,6 +125,19 @@ WHERE data_type = 'Private'
   AND {tenant_clause}
   {financial_clause}
   {date_clause}
+"""
+
+# Distinct tenants that have at least one matching stale entity (minus excluded).
+TENANTS_QUERY_BASE = """
+SELECT DISTINCT tenant_id
+FROM public.entity
+WHERE data_type = 'Private'
+  AND {custom_id_clause}
+  AND external_id IS NOT NULL
+  AND {tenant_clause}
+  {financial_clause}
+  {date_clause}
+ORDER BY tenant_id
 """
 
 STALE_DATE_COLUMNS = ("updated_date", "pd_last_known_date")
@@ -241,6 +266,23 @@ def stale_entities_count_query(
     return STALE_ENTITIES_COUNT_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
+        financial_clause=financial_stmt_clause(financial_max_age_years),
+        date_clause=DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column),
+    )
+
+
+def tenants_query(
+    mode: EntityRefreshMode,
+    *,
+    include_all: bool = False,
+    stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
+    financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
+) -> str:
+    """Distinct non-excluded tenants with matching stale entities. Always uses
+    the exclude form of the tenant clause (tenant_id param is the excluded list)."""
+    return TENANTS_QUERY_BASE.format(
+        custom_id_clause=mode.custom_id_clause,
+        tenant_clause=tenant_clause(tenant_id=None, include_all=include_all),
         financial_clause=financial_stmt_clause(financial_max_age_years),
         date_clause=DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column),
     )
@@ -424,6 +466,37 @@ async def count_stale_external_ids(
                 tenant_param,
             )
         return int(value or 0)
+    finally:
+        await conn.close()
+
+
+async def discover_tenants(
+    *,
+    mode: EntityRefreshMode,
+    date_filter: date,
+    excluded_tenants: list[str],
+    include_all: bool,
+    stale_date_column: str,
+    financial_max_age_years: int,
+) -> list[str]:
+    """Distinct tenant_ids (minus excluded) that have matching stale entities."""
+    conn = await pg_connect()
+    try:
+        query = tenants_query(
+            mode,
+            include_all=include_all,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+        )
+        if include_all:
+            rows = await conn.fetch(query, excluded_tenants)
+        else:
+            rows = await conn.fetch(
+                query,
+                datetime.combine(date_filter, datetime.min.time()),
+                excluded_tenants,
+            )
+        return [str(r["tenant_id"]) for r in rows if r["tenant_id"] is not None]
     finally:
         await conn.close()
 
@@ -938,6 +1011,153 @@ def _consume_future(
     return ok_count, fail_count, completed, run_results
 
 
+def execute_refresh(
+    *,
+    scope_tenant_id: str | None,
+    scope_index: int,
+    scope_total: int,
+    mode: EntityRefreshMode,
+    date_filter: date,
+    excluded: list[str],
+    include_all: bool,
+    stale_date_column: str,
+    financial_max_age_years: int,
+    batch_size: int,
+    limit: int | None,
+    resume_from_batch: int,
+    workers: int,
+    dry_run: bool,
+    session: requests.Session | None,
+    token_manager: TokenManager,
+    base_url: str,
+    max_retries: int,
+    logger: logging.Logger,
+) -> dict[str, object]:
+    """Run the refresh for one scope — a single tenant, or all non-excluded
+    tenants when ``scope_tenant_id`` is None. Returns a per-scope summary dict
+    whose ``status`` is ``ok`` | ``empty`` | ``error``."""
+    scope_started = datetime.now(timezone.utc)
+    label = scope_tenant_id or "<all non-excluded>"
+    if scope_total > 1:
+        logger.info("=== Tenant %s/%s: %s ===", scope_index, scope_total, label)
+
+    summary: dict[str, object] = {
+        "tenant_id": scope_tenant_id,
+        "stale_entities_found": 0,
+        "entities_to_submit": 0,
+        "total_batches": 0,
+        "batches_skipped": 0,
+        "batches_ok": 0,
+        "batches_failed": 0,
+        "failed_batches": [],
+        "elapsed_seconds": 0.0,
+        "status": "empty",
+    }
+
+    try:
+        total_found = asyncio.run(
+            count_stale_external_ids(
+                mode=mode,
+                date_filter=date_filter,
+                excluded_tenants=excluded,
+                tenant_id=scope_tenant_id,
+                include_all=include_all,
+                stale_date_column=stale_date_column,
+                financial_max_age_years=financial_max_age_years,
+            )
+        )
+    except Exception as exc:
+        logger.exception("Scope %s: count query failed: %s", label, exc)
+        summary["status"] = "error"
+        summary["note"] = f"count failed: {exc}"
+        return summary
+
+    entities_to_submit = submit_count(total_found, limit)
+    total_batches = batch_count(entities_to_submit, batch_size)
+    summary["stale_entities_found"] = total_found
+    summary["entities_to_submit"] = entities_to_submit
+    summary["total_batches"] = total_batches
+
+    if total_found == 0:
+        logger.info("Scope %s: no stale entities — skipping.", label)
+        summary["elapsed_seconds"] = round(
+            (datetime.now(timezone.utc) - scope_started).total_seconds(), 2
+        )
+        return summary
+
+    if resume_from_batch > total_batches:
+        logger.error(
+            "Scope %s: --resume-from-batch %s exceeds total batches %s",
+            label,
+            resume_from_batch,
+            total_batches,
+        )
+        summary["status"] = "error"
+        summary["note"] = "resume-from-batch exceeds total batches"
+        return summary
+
+    print_submission_plan(
+        entity_mode=mode,
+        total_found=total_found,
+        submit_count=entities_to_submit,
+        batch_count=total_batches,
+        batch_size=batch_size,
+        dry_run=dry_run,
+        limit=limit,
+        resume_from_batch=resume_from_batch,
+        logger=logger,
+    )
+
+    try:
+        ok_count, fail_count, skipped_count, run_results = asyncio.run(
+            process_batches(
+                mode=mode,
+                date_filter=date_filter,
+                excluded_tenants=excluded,
+                tenant_id=scope_tenant_id,
+                include_all=include_all,
+                stale_date_column=stale_date_column,
+                financial_max_age_years=financial_max_age_years,
+                batch_size=batch_size,
+                limit=limit,
+                resume_from_batch=resume_from_batch,
+                total_batches=total_batches,
+                workers=workers,
+                dry_run=dry_run,
+                session=session,
+                token_manager=token_manager,
+                base_url=base_url,
+                logger=logger,
+                max_retries=max_retries,
+            )
+        )
+    except Exception as exc:
+        logger.exception("Scope %s: batch processing failed: %s", label, exc)
+        summary["status"] = "error"
+        summary["note"] = f"processing failed: {exc}"
+        return summary
+
+    elapsed = (datetime.now(timezone.utc) - scope_started).total_seconds()
+    summary.update(
+        {
+            "batches_skipped": skipped_count,
+            "batches_ok": ok_count,
+            "batches_failed": fail_count,
+            "failed_batches": run_results,
+            "elapsed_seconds": round(elapsed, 2),
+            "status": "ok",
+        }
+    )
+    logger.info(
+        "Scope %s complete in %.2fs — batches ok=%s failed=%s",
+        label,
+        elapsed,
+        ok_count,
+        fail_count,
+    )
+    return summary
+
+
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
@@ -1027,7 +1247,27 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--tenant-id",
         type=str,
         default=None,
-        help="Restrict refresh to a single tenant_id (overrides tenant exclusion).",
+        help=(
+            "Restrict refresh to a single tenant_id. The excluded-tenant list "
+            "still applies (an excluded tenant is refused)."
+        ),
+    )
+    parser.add_argument(
+        "--per-tenant",
+        action="store_true",
+        help=(
+            "Refresh tenant-by-tenant: discover every tenant with stale entities "
+            "(minus excluded) and process each separately. Mutually exclusive with "
+            "--tenant-id; incompatible with --resume-from-batch."
+        ),
+    )
+    parser.add_argument(
+        "--one-per-request",
+        action="store_true",
+        help=(
+            "Submit exactly one external_id per refreshEntities call (batch size 1). "
+            "Slower, but avoids large-payload failures."
+        ),
     )
     parser.add_argument(
         "--all-entities",
@@ -1046,6 +1286,10 @@ def main(argv: list[str] | None = None) -> int:
     )
     if args.resume_from_batch < 1:
         raise SystemExit("--resume-from-batch must be >= 1")
+    if args.per_tenant and args.tenant_id:
+        raise SystemExit("--per-tenant and --tenant-id are mutually exclusive.")
+    if args.per_tenant and args.resume_from_batch > 1:
+        raise SystemExit("--resume-from-batch is not supported with --per-tenant.")
 
     run_started = datetime.now(timezone.utc)
     log_path = (
@@ -1088,15 +1332,28 @@ def main(argv: list[str] | None = None) -> int:
 
     excluded = excluded_tenant_ids()
     base_url = tessera_base_url()
-    batch_size = max(1, args.batch_size)
+    batch_size = 1 if args.one_per_request else max(1, args.batch_size)
     workers = 1 if args.dry_run else max(1, args.workers)
     max_retries = max(0, args.max_retries)
 
+    # Exclusion always wins: a named excluded tenant is refused.
+    if tenant_id and tenant_id in excluded:
+        logger.warning(
+            "Tenant %s is in the excluded list — nothing to refresh (exclusion always wins).",
+            tenant_id,
+        )
+        print(f"\nTenant {tenant_id} is excluded — nothing to do.\n")
+        return 0
+
     logger.info("Stale cutoff (%s <): %s", stale_date_column, date_filter.isoformat())
+    if args.one_per_request:
+        logger.info("One-per-request mode: batch size forced to 1")
     if args.all_entities:
         logger.info("Including all entities (ignoring stale date filter)")
     if tenant_id:
-        logger.info("Tenant filter: %s", tenant_id)
+        logger.info("Tenant filter: %s (exclusion still applies)", tenant_id)
+    elif args.per_tenant:
+        logger.info("Per-tenant mode; excluded tenant_id values: %s", excluded)
     else:
         logger.info("Excluded tenant_id values: %s", excluded)
     logger.info("Tessera base URL: %s", base_url)
@@ -1110,55 +1367,6 @@ def main(argv: list[str] | None = None) -> int:
     if args.dry_run:
         logger.info("Dry run enabled — no API submissions")
 
-    try:
-        total_found = asyncio.run(
-            count_stale_external_ids(
-                mode=entity_mode,
-                date_filter=date_filter,
-                excluded_tenants=excluded,
-                tenant_id=tenant_id,
-                include_all=args.all_entities,
-                stale_date_column=stale_date_column,
-                financial_max_age_years=financial_max_age_years,
-            )
-        )
-    except Exception as exc:
-        logger.exception("Database query failed: %s", exc)
-        return 1
-
-    entities_to_submit = submit_count(total_found, args.limit)
-    total_batches = batch_count(entities_to_submit, batch_size)
-
-    if total_found == 0:
-        print(f"\nNo stale {entity_mode.name} entities found — nothing to submit for refresh.\n")
-        logger.info("No stale entities found — nothing to submit for refresh.")
-        return 0
-
-    if args.resume_from_batch > total_batches:
-        logger.error(
-            "--resume-from-batch %s exceeds total batches %s",
-            args.resume_from_batch,
-            total_batches,
-        )
-        return 1
-
-    print_submission_plan(
-        entity_mode=entity_mode,
-        total_found=total_found,
-        submit_count=entities_to_submit,
-        batch_count=total_batches,
-        batch_size=batch_size,
-        dry_run=args.dry_run,
-        limit=args.limit,
-        resume_from_batch=args.resume_from_batch,
-        logger=logger,
-    )
-    logger.info(
-        "Count query complete — %s stale entities, %s batches to process",
-        f"{total_found:,}",
-        f"{total_batches:,}",
-    )
-
     manual_token = _env("STALE_REFRESH_MANUAL_TOKEN") or None
     token_manager = TokenManager(
         sso_url=_env("MOODYS_SSO_URL", DEFAULT_SSO_URL),
@@ -1168,7 +1376,6 @@ def main(argv: list[str] | None = None) -> int:
         logger=logger,
         manual_token=manual_token,
     )
-
     if not args.dry_run:
         try:
             token_manager.get_token()
@@ -1178,62 +1385,103 @@ def main(argv: list[str] | None = None) -> int:
 
     session = create_http_session(workers) if workers == 1 else None
 
-    try:
-        ok_count, fail_count, skipped_count, run_results = asyncio.run(
-            process_batches(
+    # Decide the scopes to process.
+    if args.per_tenant:
+        try:
+            tenants = asyncio.run(
+                discover_tenants(
+                    mode=entity_mode,
+                    date_filter=date_filter,
+                    excluded_tenants=excluded,
+                    include_all=args.all_entities,
+                    stale_date_column=stale_date_column,
+                    financial_max_age_years=financial_max_age_years,
+                )
+            )
+        except Exception as exc:
+            logger.exception("Tenant discovery failed: %s", exc)
+            return 1
+        if not tenants:
+            print(f"\nNo stale {entity_mode.name} entities in any tenant — nothing to refresh.\n")
+            logger.info("No tenants with stale entities.")
+            return 0
+        logger.info("Per-tenant mode: %s tenant(s) with stale entities", len(tenants))
+        scopes: list[str | None] = list(tenants)
+        mode_label = "per-tenant"
+    elif tenant_id:
+        scopes = [tenant_id]
+        mode_label = "single"
+    else:
+        scopes = [None]
+        mode_label = "all"
+
+    scope_summaries: list[dict[str, object]] = []
+    for i, scope in enumerate(scopes, start=1):
+        scope_summaries.append(
+            execute_refresh(
+                scope_tenant_id=scope,
+                scope_index=i,
+                scope_total=len(scopes),
                 mode=entity_mode,
                 date_filter=date_filter,
-                excluded_tenants=excluded,
-                tenant_id=tenant_id,
+                excluded=excluded,
                 include_all=args.all_entities,
                 stale_date_column=stale_date_column,
                 financial_max_age_years=financial_max_age_years,
                 batch_size=batch_size,
                 limit=args.limit,
                 resume_from_batch=args.resume_from_batch,
-                total_batches=total_batches,
                 workers=workers,
                 dry_run=args.dry_run,
                 session=session,
                 token_manager=token_manager,
                 base_url=base_url,
-                logger=logger,
                 max_retries=max_retries,
+                logger=logger,
             )
         )
-    except Exception as exc:
-        logger.exception("Batch processing failed: %s", exc)
-        return 1
 
     elapsed = (datetime.now(timezone.utc) - run_started).total_seconds()
+    totals = {
+        "stale_entities_found": sum(int(s["stale_entities_found"]) for s in scope_summaries),
+        "entities_to_submit": sum(int(s["entities_to_submit"]) for s in scope_summaries),
+        "total_batches": sum(int(s["total_batches"]) for s in scope_summaries),
+        "batches_ok": sum(int(s["batches_ok"]) for s in scope_summaries),
+        "batches_failed": sum(int(s["batches_failed"]) for s in scope_summaries),
+        "tenants_processed": sum(1 for s in scope_summaries if s["status"] == "ok"),
+        "tenants_empty": sum(1 for s in scope_summaries if s["status"] == "empty"),
+        "tenants_error": sum(1 for s in scope_summaries if s["status"] == "error"),
+    }
     summary = {
         "entity_type": entity_mode.name,
         "payload_type": entity_mode.payload_type,
-        "tenant_id": tenant_id,
+        "mode": mode_label,
         "include_all_entities": args.all_entities,
         "stale_date_column": stale_date_column,
         "financial_max_age_years": financial_max_age_years,
         "date_filter": date_filter.isoformat(),
-        "stale_entities_found": total_found,
-        "entities_to_submit": entities_to_submit,
-        "total_batches": total_batches,
+        "batch_size": batch_size,
+        "one_per_request": args.one_per_request,
         "workers": workers,
         "max_retries": max_retries,
-        "batches_skipped": skipped_count,
         "resume_from_batch": args.resume_from_batch,
-        "batches_ok": ok_count,
-        "batches_failed": fail_count,
-        "failed_batches": run_results,
-        "elapsed_seconds": round(elapsed, 2),
         "dry_run": args.dry_run,
+        "elapsed_seconds": round(elapsed, 2),
+        "totals": totals,
+        "tenants": scope_summaries,
     }
     logger.info("Run summary: %s", json.dumps(summary, indent=2))
     logger.info(
-        "Completed in %.2fs — batches ok=%s failed=%s",
+        "Completed in %.2fs — tenants ok=%s empty=%s error=%s; batches ok=%s failed=%s",
         elapsed,
-        ok_count,
-        fail_count,
+        totals["tenants_processed"],
+        totals["tenants_empty"],
+        totals["tenants_error"],
+        totals["batches_ok"],
+        totals["batches_failed"],
     )
+    if totals["stale_entities_found"] == 0:
+        print(f"\nNo stale {entity_mode.name} entities found — nothing to submit for refresh.\n")
 
     summary_path = log_path.with_suffix(".summary.json")
     summary_path.write_text(
@@ -1242,7 +1490,8 @@ def main(argv: list[str] | None = None) -> int:
     )
     logger.info("Summary JSON: %s", summary_path)
 
-    return 0 if fail_count == 0 else 1
+    had_error = totals["tenants_error"] > 0 or totals["batches_failed"] > 0
+    return 1 if had_error else 0
 
 
 if __name__ == "__main__":
