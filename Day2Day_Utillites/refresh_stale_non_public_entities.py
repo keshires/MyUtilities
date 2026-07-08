@@ -470,6 +470,24 @@ async def count_stale_external_ids(
         await conn.close()
 
 
+def read_completed_tenants(path: Path) -> set[str]:
+    """Tenant ids already recorded as done in the checkpoint file (may not exist)."""
+    if not path.exists():
+        return set()
+    return {
+        line.strip()
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+
+
+def append_completed_tenant(path: Path, tenant_id: str) -> None:
+    """Record a tenant as done so a resumed run skips it."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as fh:
+        fh.write(f"{tenant_id}\n")
+
+
 async def discover_tenants(
     *,
     mode: EntityRefreshMode,
@@ -1270,6 +1288,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--tenant-checkpoint",
+        type=str,
+        default=None,
+        help=(
+            "Per-tenant checkpoint file (use with --per-tenant). Tenants already "
+            "listed are skipped; each tenant is appended as it completes, so "
+            "re-running with the same file resumes without re-processing tenants."
+        ),
+    )
+    parser.add_argument(
         "--all-entities",
         action="store_true",
         help="Include all matching entities, not only those stale by --date-filter.",
@@ -1385,6 +1413,9 @@ def main(argv: list[str] | None = None) -> int:
 
     session = create_http_session(workers) if workers == 1 else None
 
+    checkpoint_path = Path(args.tenant_checkpoint) if args.tenant_checkpoint else None
+    tenants_skipped_by_checkpoint = 0
+
     # Decide the scopes to process.
     if args.per_tenant:
         try:
@@ -1405,7 +1436,23 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\nNo stale {entity_mode.name} entities in any tenant — nothing to refresh.\n")
             logger.info("No tenants with stale entities.")
             return 0
-        logger.info("Per-tenant mode: %s tenant(s) with stale entities", len(tenants))
+        discovered = len(tenants)
+        if checkpoint_path:
+            done = read_completed_tenants(checkpoint_path)
+            tenants = [t for t in tenants if t not in done]
+            tenants_skipped_by_checkpoint = discovered - len(tenants)
+            logger.info(
+                "Checkpoint %s: %s tenant(s) already done, %s remaining (of %s discovered)",
+                checkpoint_path,
+                tenants_skipped_by_checkpoint,
+                len(tenants),
+                discovered,
+            )
+            if not tenants:
+                print("\nAll discovered tenants already completed per checkpoint — nothing to do.\n")
+                logger.info("All tenants already completed per checkpoint.")
+                return 0
+        logger.info("Per-tenant mode: %s tenant(s) to process this run", len(tenants))
         scopes: list[str | None] = list(tenants)
         mode_label = "per-tenant"
     elif tenant_id:
@@ -1417,29 +1464,38 @@ def main(argv: list[str] | None = None) -> int:
 
     scope_summaries: list[dict[str, object]] = []
     for i, scope in enumerate(scopes, start=1):
-        scope_summaries.append(
-            execute_refresh(
-                scope_tenant_id=scope,
-                scope_index=i,
-                scope_total=len(scopes),
-                mode=entity_mode,
-                date_filter=date_filter,
-                excluded=excluded,
-                include_all=args.all_entities,
-                stale_date_column=stale_date_column,
-                financial_max_age_years=financial_max_age_years,
-                batch_size=batch_size,
-                limit=args.limit,
-                resume_from_batch=args.resume_from_batch,
-                workers=workers,
-                dry_run=args.dry_run,
-                session=session,
-                token_manager=token_manager,
-                base_url=base_url,
-                max_retries=max_retries,
-                logger=logger,
-            )
+        scope_summary = execute_refresh(
+            scope_tenant_id=scope,
+            scope_index=i,
+            scope_total=len(scopes),
+            mode=entity_mode,
+            date_filter=date_filter,
+            excluded=excluded,
+            include_all=args.all_entities,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+            batch_size=batch_size,
+            limit=args.limit,
+            resume_from_batch=args.resume_from_batch,
+            workers=workers,
+            dry_run=args.dry_run,
+            session=session,
+            token_manager=token_manager,
+            base_url=base_url,
+            max_retries=max_retries,
+            logger=logger,
         )
+        scope_summaries.append(scope_summary)
+        # Record a completed tenant so a resumed run skips it. Only when it fully
+        # succeeded (no failed batches) and not in a dry run.
+        if (
+            checkpoint_path
+            and scope is not None
+            and not args.dry_run
+            and scope_summary["status"] in ("ok", "empty")
+            and int(scope_summary["batches_failed"]) == 0
+        ):
+            append_completed_tenant(checkpoint_path, scope)
 
     elapsed = (datetime.now(timezone.utc) - run_started).total_seconds()
     totals = {
@@ -1466,6 +1522,8 @@ def main(argv: list[str] | None = None) -> int:
         "max_retries": max_retries,
         "resume_from_batch": args.resume_from_batch,
         "dry_run": args.dry_run,
+        "tenant_checkpoint": str(checkpoint_path) if checkpoint_path else None,
+        "tenants_skipped_by_checkpoint": tenants_skipped_by_checkpoint,
         "elapsed_seconds": round(elapsed, 2),
         "totals": totals,
         "tenants": scope_summaries,
