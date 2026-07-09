@@ -7,12 +7,21 @@ For every still-stale entity (same predicates as
 ``refresh_stale_non_public_entities.py``: recent financials, ``pd_last_known_date``
 before the cutoff, excluded tenants) we:
 
-  1. Read ``financials_process_id`` from ``entity_custom_data`` (1:1 with entity).
-  2. Build ``entityId = {external_id}-{financials_process_id}``.
+  1. Read ``financials_process_id``, custom financials/profile flags, and
+     ``peer_group_id`` from ``entity_custom_data``.
+  2. Build the request EXACTLY as the refresh does — effective ``entityId``
+     (``{external_id}-{financials_process_id}`` only when the process id is valid,
+     else bare ``external_id``), plus ``peerId`` for peer-driven entities, plus
+     ``endDate=today``.
   3. POST batches to ``/edfx/v1/entities/pds`` (asyncResponse=false) and read the
      latest ``asOfDate`` the model can produce.
-  4. Compare API ``asOfDate`` with the DB ``pd_last_known_date`` and assign a
-     verdict, then write everything to CSV.
+  4. Compare API ``asOfDate`` with the DB ``pd_last_known_date``, assign a verdict,
+     write per-entity CSV, and a companion peer-group CSV of the peer groups whose
+     stale members need reprocessing upstream.
+
+Peer awareness matters: a peer-driven entity's PD is bounded by its peer group's
+latest month, so it must be validated WITH ``peerId`` (matching the refresh) —
+otherwise the standalone PD looks newer and the entity is falsely flagged behind.
 
 Entities with a NULL ``financials_process_id`` are submitted for refresh (so they
 get a new process id) and flagged in the CSV — no API call is possible for them.
@@ -53,6 +62,10 @@ CSV_FIELDS = [
     "external_id",
     "custom_id",
     "tenant_id",
+    "is_peer_driven",
+    "peer_group_id",
+    "peer_group_name",
+    "confidence_code",
     "financials_process_status",
     "financials_process_id",
     "entity_id",
@@ -67,6 +80,20 @@ CSV_FIELDS = [
     "api_confidence_description",
     "verdict",
 ]
+
+# Peer-group summary (the actionable list of groups to reprocess upstream).
+PEER_GROUP_CSV_FIELDS = [
+    "peer_group_id",
+    "peer_group_name",
+    "affected_entities",
+    "min_pd_last_known_date",
+    "max_pd_last_known_date",
+    "tenants",
+]
+
+# entity_custom_data.financials_process_status values for which the process id is
+# usable for a PD/model lookup (mirrors EntityFinancialsProcessStatus in tessera).
+VALID_PROCESS_ID_STATUSES = ("Completed", "Completed with errors")
 
 
 def _pd_stale_where(stale_date_column: str, financial_max_age_years: int) -> str:
@@ -102,8 +129,12 @@ def build_query(
 SELECT e.external_id, e.custom_id, e.tenant_id, e.pd_last_known_date, e.as_of_date,
        e.updated_date AS e_updated_date,
        e.entity_data ->> 'financialStmtDate' AS financial_stmt_date,
+       e.entity_data ->> 'confidenceCode' AS confidence_code,
+       e.entity_data ->> 'isPeerDriven' AS is_peer_driven,
+       e.entity_data ->> 'peerGroupName' AS peer_group_name,
        ecd.financials_process_id, ecd.transit_financials_process_id,
-       ecd.financials_process_status
+       ecd.financials_process_status, ecd.financials_type, ecd.peer_group_id,
+       ecd.country, ecd.industry, ecd.state, ecd.target_cdt
 FROM entity e
 INNER JOIN entity_custom_data ecd ON e.external_id = ecd.external_id
 WHERE e.data_type = 'Private'
@@ -137,6 +168,22 @@ def _as_date(value: object) -> date | None:
         return None
 
 
+def _has_valid_process_id(rec: dict) -> bool:
+    """Mirror tessera's EntityCustomizations.has_valid_process_id: the process id is
+    used for PD lookup only when the entity has custom financials or a custom profile
+    AND the financials process finished."""
+    custom_fin = rec.get("financials_type") == "custom"
+    custom_prof = any(rec.get(k) is not None for k in ("country", "industry", "state", "target_cdt"))
+    return (custom_fin or custom_prof) and rec.get("financials_process_status") in VALID_PROCESS_ID_STATUSES
+
+
+def effective_entity_id(rec: dict) -> str:
+    """The entityId the refresh actually queries PD with (get_effective_entity_id)."""
+    if _has_valid_process_id(rec) and rec.get("financials_process_id"):
+        return f"{rec['external_id']}-{rec['financials_process_id']}"
+    return str(rec["external_id"])
+
+
 async def fetch_stale_rows(
     *,
     mode: "rf.EntityRefreshMode",
@@ -164,18 +211,24 @@ async def fetch_stale_rows(
 
 
 def fetch_pds_batch(
-    entity_ids: list[str],
+    entity_requests: list[dict],
     *,
+    end_date: str,
     token_manager: "rf.TokenManager",
     base_url: str,
     logger,
     max_retries: int,
 ) -> dict[str, dict]:
     """POST a batch to the PDs endpoint; return {entityId: result}. Retries 5xx /
-    network errors with backoff. Raises on unrecoverable failure."""
+    network errors with backoff. Raises on unrecoverable failure.
+
+    ``entity_requests`` are ``{"entityId": ..., "peerId": ...}`` dicts built exactly
+    as the refresh does (effective entityId + peerId), and ``end_date`` / modelDetail
+    match the refresh's latest-PD call, so verdicts reflect what the refresh writes."""
     url = f"{base_url}{PDS_ENDPOINT}"
     payload = {
         "asyncResponse": False,
+        "endDate": end_date,
         "modelParameters": {
             "fso": False,
             "modelId": None,
@@ -185,11 +238,11 @@ def fetch_pds_batch(
         "includeDetail": {
             "resultDetail": False,
             "inputDetail": False,
-            "modelDetail": False,
+            "modelDetail": True,
             "includeTermStructure": False,
             "includeHistoryTermStructure": False,
         },
-        "entities": [{"entityId": eid} for eid in entity_ids],
+        "entities": entity_requests,
     }
     retries_used = 0
     while True:
@@ -251,6 +304,10 @@ def build_row(rec: dict, entity_id: str | None, api: dict | None) -> dict:
         "external_id": rec["external_id"],
         "custom_id": _iso(rec["custom_id"]),
         "tenant_id": rec["tenant_id"],
+        "is_peer_driven": _iso(rec.get("is_peer_driven")),
+        "peer_group_id": _iso(rec.get("peer_group_id")),
+        "peer_group_name": _iso(rec.get("peer_group_name")),
+        "confidence_code": _iso(rec.get("confidence_code")),
         "financials_process_status": _iso(rec["financials_process_status"]),
         "financials_process_id": _iso(rec["financials_process_id"]),
         "entity_id": entity_id or "",
@@ -342,9 +399,9 @@ def main(argv: list[str] | None = None) -> int:
     for rec in rows:
         fpid = rec["financials_process_id"]
         if fpid:
-            eid = f"{rec['external_id']}-{fpid}"
-            entity_id_to_row[eid] = rec
-            rec["_entity_id"] = eid
+            rec["_entity_id"] = effective_entity_id(rec)
+            rec["_peer_id"] = rec.get("peer_group_id")
+            entity_id_to_row[rec["_entity_id"]] = rec
             with_pid.append(rec)
         else:
             missing_pid.append(rec)
@@ -365,17 +422,24 @@ def main(argv: list[str] | None = None) -> int:
             logger.error("Authentication failed: %s", exc)
             return 1
 
-    # Query the PDs API in batches.
+    # Query the PDs API in batches — build each request exactly as the refresh does
+    # (effective entityId + peerId), with endDate=today, so verdicts reflect reality.
+    end_date_str = date.today().isoformat()
     api_by_entity: dict[str, dict] = {}
     batches = [with_pid[i:i + api_batch_size] for i in range(0, len(with_pid), api_batch_size)]
     for bi, batch in enumerate(batches, start=1):
-        entity_ids = [rec["_entity_id"] for rec in batch]
+        entity_requests = []
+        for rec in batch:
+            ent = {"entityId": rec["_entity_id"]}
+            if rec.get("_peer_id"):
+                ent["peerId"] = rec["_peer_id"]
+            entity_requests.append(ent)
         if args.dry_run:
-            logger.info("[DRY RUN] PDs batch %s/%s — would query %s entityIds", bi, len(batches), len(entity_ids))
+            logger.info("[DRY RUN] PDs batch %s/%s — would query %s entityIds", bi, len(batches), len(entity_requests))
             continue
         try:
-            result = fetch_pds_batch(entity_ids, token_manager=token_manager, base_url=base_url,
-                                     logger=logger, max_retries=max_retries)
+            result = fetch_pds_batch(entity_requests, end_date=end_date_str, token_manager=token_manager,
+                                     base_url=base_url, logger=logger, max_retries=max_retries)
             api_by_entity.update(result)
         except Exception as exc:
             logger.error("PDs batch %s/%s failed: %s", bi, len(batches), exc)
@@ -400,6 +464,7 @@ def main(argv: list[str] | None = None) -> int:
     # Build CSV rows.
     out_csv.parent.mkdir(parents=True, exist_ok=True)
     verdict_counts: dict[str, int] = {}
+    all_rows: list[dict] = []
     with out_csv.open("w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=CSV_FIELDS, extrasaction="ignore")
         writer.writeheader()
@@ -407,11 +472,49 @@ def main(argv: list[str] | None = None) -> int:
             api = api_by_entity.get(rec["_entity_id"])
             row = build_row(rec, rec["_entity_id"], api)
             writer.writerow(row)
+            all_rows.append(row)
             verdict_counts[row["verdict"]] = verdict_counts.get(row["verdict"], 0) + 1
         for rec in missing_pid:
             row = build_row(rec, None, None)
             writer.writerow(row)
+            all_rows.append(row)
             verdict_counts[row["verdict"]] = verdict_counts.get(row["verdict"], 0) + 1
+
+    # Peer-group summary: peer-driven entities still short of the cutoff — the
+    # actionable set of peer groups to reprocess upstream so their PD reaches cutoff.
+    peer_groups: dict[str, dict] = {}
+    for row in all_rows:
+        db_pd = _as_date(row["db_pd_last_known_date"])
+        peer_bounded = (
+            (row["is_peer_driven"] or "").lower() == "true"
+            and row["peer_group_id"]
+            and (db_pd is None or db_pd < cutoff_date)
+        )
+        if not peer_bounded:
+            continue
+        g = peer_groups.setdefault(row["peer_group_id"], {
+            "peer_group_id": row["peer_group_id"],
+            "peer_group_name": row["peer_group_name"],
+            "affected_entities": 0,
+            "_pds": [],
+            "_tenants": set(),
+        })
+        g["affected_entities"] += 1
+        if db_pd:
+            g["_pds"].append(db_pd)
+        g["_tenants"].add(row["tenant_id"])
+    peer_group_csv = out_csv.with_name(out_csv.name.replace("stale_pd_source_", "stale_peer_groups_"))
+    with peer_group_csv.open("w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=PEER_GROUP_CSV_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        for g in sorted(peer_groups.values(), key=lambda x: -x["affected_entities"]):
+            pds = g.pop("_pds")
+            tenants = g.pop("_tenants")
+            g["min_pd_last_known_date"] = min(pds).isoformat() if pds else ""
+            g["max_pd_last_known_date"] = max(pds).isoformat() if pds else ""
+            g["tenants"] = ";".join(sorted(t for t in tenants if t))
+            writer.writerow(g)
+    logger.info("Peer groups to reprocess: %s (CSV: %s)", len(peer_groups), peer_group_csv)
 
     elapsed = (datetime.now(timezone.utc) - run_started).total_seconds()
     summary = {
@@ -424,7 +527,9 @@ def main(argv: list[str] | None = None) -> int:
         "missing_process_id": len(missing_pid),
         "missing_refresh_submitted": refresh_submitted,
         "verdicts": verdict_counts,
+        "peer_groups_to_reprocess": len(peer_groups),
         "output_csv": str(out_csv),
+        "peer_group_csv": str(peer_group_csv),
         "dry_run": args.dry_run,
         "elapsed_seconds": round(elapsed, 2),
     }
@@ -438,7 +543,9 @@ def main(argv: list[str] | None = None) -> int:
     print(f"  Entities checked : {len(rows):,}")
     for v, c in sorted(verdict_counts.items(), key=lambda kv: -kv[1]):
         print(f"    {v:34}: {c:,}")
+    print(f"  Peer groups to reprocess : {len(peer_groups):,}")
     print(f"  CSV              : {out_csv}")
+    print(f"  Peer-group CSV   : {peer_group_csv}")
     print("=" * 60 + "\n")
     return 0
 
