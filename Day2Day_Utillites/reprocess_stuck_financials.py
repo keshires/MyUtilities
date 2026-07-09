@@ -114,18 +114,22 @@ def build_query(
     if include_null:
         status_clause = f"({status_clause} OR ecd.financials_process_status IS NULL)"
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
+    # Lead from entity_custom_data and filter on financials_process_status first:
+    # that predicate is highly selective, whereas starting from entity scans all
+    # ~10M+ Private rows. (With --include-null-status the OR IS NULL still matches
+    # every NULL-status row and is inherently slow — see the warning in main.)
     return f"""
 SELECT e.external_id, e.custom_id, e.tenant_id, e.pd_last_known_date, e.as_of_date,
        e.entity_data ->> 'financialStmtDate' AS financial_stmt_date,
        ecd.financials_process_status, ecd.financials_process_status_date,
        ecd.financials_process_id, ecd.financials_type
-FROM entity e
-INNER JOIN entity_custom_data ecd ON e.external_id = ecd.external_id
-WHERE e.data_type = 'Private'
-  AND {custom_clause}
-  AND e.external_id IS NOT NULL
+FROM entity_custom_data ecd
+INNER JOIN entity e ON e.external_id = ecd.external_id
+     AND e.data_type = 'Private'
+     AND {custom_clause}
+     AND e.external_id IS NOT NULL
+WHERE {status_clause}
   AND {tenant_clause}
-  AND {status_clause}
 ORDER BY ecd.financials_process_status_date NULLS FIRST, e.external_id
 {limit_clause}
 """
@@ -328,6 +332,12 @@ def main(argv: list[str] | None = None) -> int:
 
     logger.info("Entity type: %s | statuses: %s | include_null: %s | submit: %s",
                 mode.name, statuses, args.include_null_status, args.submit)
+    if args.include_null_status:
+        logger.warning(
+            "--include-null-status matches ALL NULL-status rows (~10M for private); "
+            "the query cannot use an index and will be slow. Only worth it for the few "
+            "custom NULL anomalies."
+        )
 
     rows = asyncio.run(fetch_stuck_rows(
         mode=mode, tenant_id=tenant_id, excluded=excluded, statuses=statuses,
