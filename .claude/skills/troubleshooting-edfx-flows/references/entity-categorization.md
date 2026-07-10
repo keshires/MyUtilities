@@ -36,16 +36,12 @@ a failed one. That's why the ~10M private NULL-status rows must be excluded from
 |---|---|
 | **Public** | `data_type = 'Public'` and `custom_id IS NULL` |
 | **Private** | `data_type = 'Private'` and `custom_id IS NULL` |
-| **Custom** | `data_type = 'Public'` and `custom_id IS NOT NULL` |
+| **Custom** | `data_type = 'Private'` and `custom_id IS NOT NULL` |
 | **Public / Private Customized** | see the detection query below |
 
-> ⚠️ **Caution / cross-reference.** In this repo's stale-entity refresh work
-> (`Day2Day_Utillites/refresh_stale_non_public_entities.py`), the two modes were:
-> `custom` = `data_type='Private' AND custom_id IS NOT NULL`, `private` =
-> `data_type='Private' AND custom_id IS NULL`. That differs from the "Custom =
-> `data_type='Public'`" row above. Confirm the exact `data_type` against the data for
-> your use case before filtering — the definitions here are the owner's summary and
-> may reflect a different slice than the refresh scripts.
+> ✅ **Matches the refresh scripts.** `Day2Day_Utillites/refresh_stale_non_public_entities.py`
+> scopes its two modes the same way: `custom` = `data_type='Private' AND custom_id IS NOT NULL`,
+> `private` = `data_type='Private' AND custom_id IS NULL`.
 
 ## "Public / Private Customized" detection query
 
