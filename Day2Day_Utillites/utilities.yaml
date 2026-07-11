@@ -71,9 +71,9 @@ utilities:
     invocation: cli
     args:
       - flag: --entity-type
-        choices: [custom, private]
+        choices: [custom, private, customized]
         default: private
-        help: "custom (non-public-customized) or private (non-public). Alias: customized. Default: STALE_REFRESH_ENTITY_TYPE or 'private'."
+        help: "custom (non-public-customized; alias 'customized') or private (non-public). Not argparse-enforced. Default: STALE_REFRESH_ENTITY_TYPE or 'private'."
       - flag: --date-filter
         help: "Stale cutoff YYYY-MM-DD. Default first of current month."
       - flag: --stale-date-column
