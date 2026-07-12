@@ -7,6 +7,12 @@ logs/
 # Generated CSV / JSON / Excel exports (see project_paths.py)
 output/
 
+# Local input files (test fixtures, bulk-upload data — not tracked)
+inputfiles/
+
+# Generated output files (Spark exports, etc. — not tracked)
+outputfiles/
+
 # Python / tooling
 .venv/
 venv/
