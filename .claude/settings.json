@@ -1,0 +1,37 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(git commit -m ' *)",
+      "Bash(python -c ' *)",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/validate_stale_pd_source.py\" --entity-type custom --stale-date-column pd_last_known_date --api-batch-size 50 --no-refresh-missing)",
+      "Bash(OUT=\"C:\\\\Users\\\\keshires\\\\AppData\\\\Local\\\\Temp\\\\1\\\\claude\\\\c--Github-MyUtilities\\\\c5962c6d-04a5-4b1a-ba1f-bdab50632ceb\\\\tasks\\\\b2sycyjyx.output\"; sed -n '/PD SOURCE VALIDATION/,/Peer-group CSV/p' \"$OUT\")",
+      "Bash(python -m py_compile reprocess_stuck_financials.py)",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/reprocess_stuck_financials.py\" --entity-type custom --include-null-status)",
+      "Bash(grep -vE \"^\\\\s*$\")",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/reprocess_stuck_financials.py\" --entity-type custom --include-null-status --submit --workers 8)",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/reprocess_stuck_financials.py\" --recheck-from \"C:/Github/MyUtilities/Day2Day_Utillites/logs/reprocess_stuck_financials_20260709_184013.snapshot.json\")",
+      "Bash(/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe -c ' *)",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" /tmp/_submit_ids.py \"C:/Github/MyUtilities/Day2Day_Utillites/logs/db_behind_api_42.txt\")",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/reprocess_stuck_financials.py\" --entity-type custom --statuses \"Failed,Aborted,Started\")",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/reprocess_stuck_financials.py\" --entity-type private --statuses \"Failed,Aborted,Started\")",
+      "Bash(\"/c/Github/MyUtilities/Day2Day_Utillites/.venv/Scripts/python.exe\" \"C:/Github/MyUtilities/Day2Day_Utillites/reprocess_stuck_financials.py\" --entity-type private --statuses \"Failed,Aborted,Started\" --submit --workers 8)",
+      "Edit(/.claude/skills/troubleshooting-edfx-flows/**)",
+      "Bash(OUT=\"C:\\\\Users\\\\keshires\\\\AppData\\\\Local\\\\Temp\\\\1\\\\claude\\\\c--Github-MyUtilities\\\\c5962c6d-04a5-4b1a-ba1f-bdab50632ceb\\\\tasks\\\\brz0hni2z.output\"; sed -n '/PD SOURCE VALIDATION/,/Peer-group CSV/p' \"$OUT\")",
+      "Bash(./.venv/Scripts/python -c \"from dashboard.manifest import load_manifest; m=load_manifest\\(\\); print\\(len\\(m.utilities\\),'utilities'\\); print\\(sorted\\({u.category for u in m.utilities}\\)\\)\")",
+      "Bash(./.venv/Scripts/python -c ' *)",
+      "Bash(.\\\\.venv\\\\Scripts\\\\python -c \"from dashboard.manifest import load_manifest; from dashboard.runs import list_runs; m=load_manifest\\(\\); u=[u for u in m.utilities if u.id=='run-portfolio-kpis-postgres'][0]; r=list_runs\\(u\\); print\\(len\\(r\\),'runs'\\); print\\(r[0]['name'] if r else 'none'\\)\")",
+      "Bash(command -v python3 python py)",
+      "Bash(where python *)",
+      "Bash(where python3 *)",
+      "Read(//c/Windows/**)",
+      "Bash(./.venv/Scripts/python.exe -c ' *)",
+      "Bash(git rm *)",
+      "Bash(awk '{print $1}')",
+      "Bash(git fetch *)"
+    ],
+    "additionalDirectories": [
+      "C:\\Users\\keshires\\AppData\\Local\\Temp\\1\\claude\\c--Github-MyUtilities\\c5962c6d-04a5-4b1a-ba1f-bdab50632ceb\\tasks",
+      "c:\\Github"
+    ]
+  }
+}
