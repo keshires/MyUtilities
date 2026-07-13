@@ -354,7 +354,7 @@ def main(argv: list[str] | None = None) -> int:
     financial_max_age_years = max(0, args.financial_max_age_years)
 
     run_started = datetime.now(timezone.utc)
-    log_path = rf.logs_dir() / f"validate_stale_pd_source_{mode.name}_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
+    log_path = rf.logs_dir("validate_stale_pd_source") / f"validate_stale_pd_source_{mode.name}_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
     logger = rf.setup_logging(log_path)
 
     missing = rf.missing_postgres_env()
@@ -374,9 +374,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output is None:
         ts = run_started.strftime("%Y%m%d_%H%M%S")
-        out_csv = output_dir("stale_entities") / f"stale_pd_source_{mode.name}_{ts}.csv"
+        out_csv = output_dir("validate_stale_pd_source") / f"stale_pd_source_{mode.name}_{ts}.csv"
     else:
-        out_csv = resolve_cli_artifact(args.output, "stale_entities")
+        out_csv = resolve_cli_artifact(args.output, "validate_stale_pd_source")
 
     logger.info("Entity type: %s | stale column: %s | financial max age: %s yr",
                 mode.name, stale_date_column, financial_max_age_years)

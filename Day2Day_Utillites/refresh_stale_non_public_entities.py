@@ -1321,7 +1321,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_started = datetime.now(timezone.utc)
     log_path = (
-        logs_dir()
+        logs_dir("refresh_stale_entities")
         / f"refresh_stale_entities_{entity_mode.name}_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
     )
     logger = setup_logging(log_path)

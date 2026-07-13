@@ -436,7 +436,7 @@ def main(argv: list[str] | None = None) -> int:
 
     run_started = datetime.now(timezone.utc)
     log_path = (
-        logs_dir()
+        logs_dir("validate_stale_entities")
         / f"validate_stale_entities_{entity_type}_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
     )
     logger = setup_logging(log_path)
@@ -456,9 +456,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output is None:
         ts = run_started.strftime("%Y%m%d_%H%M%S")
-        out_csv = output_dir("stale_entities") / f"stale_reconcile_{entity_type}_{ts}.csv"
+        out_csv = output_dir("validate_stale_entities") / f"stale_reconcile_{entity_type}_{ts}.csv"
     else:
-        out_csv = resolve_cli_artifact(args.output, "stale_entities")
+        out_csv = resolve_cli_artifact(args.output, "validate_stale_entities")
 
     logger.info("Run started")
     logger.info("Entity type: %s", entity_type)

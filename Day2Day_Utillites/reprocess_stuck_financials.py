@@ -289,7 +289,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
     run_started = datetime.now(timezone.utc)
-    log_path = rf.logs_dir() / f"reprocess_stuck_financials_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
+    log_path = rf.logs_dir("reprocess_stuck_financials") / f"reprocess_stuck_financials_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
     logger = rf.setup_logging(log_path)
 
     missing = rf.missing_postgres_env()
@@ -350,9 +350,9 @@ def main(argv: list[str] | None = None) -> int:
 
     ts = run_started.strftime("%Y%m%d_%H%M%S")
     if args.output is None:
-        out_csv = output_dir("stale_entities") / f"stuck_financials_{mode.name}_{ts}.csv"
+        out_csv = output_dir("reprocess_stuck_financials") / f"stuck_financials_{mode.name}_{ts}.csv"
     else:
-        out_csv = resolve_cli_artifact(args.output, "stale_entities")
+        out_csv = resolve_cli_artifact(args.output, "reprocess_stuck_financials")
     tenant_csv = out_csv.with_name(out_csv.name.replace("stuck_financials_", "stuck_financials_by_tenant_"))
 
     stats = write_reports(rows, out_csv=out_csv, tenant_csv=tenant_csv, now=run_started)
@@ -370,7 +370,7 @@ def main(argv: list[str] | None = None) -> int:
         }, indent=2, default=str), encoding="utf-8")
 
         checkpoint_path = Path(args.checkpoint) if args.checkpoint else (
-            rf.logs_dir() / f"reprocess_stuck_financials_{mode.name}_checkpoint.txt")
+            rf.logs_dir("reprocess_stuck_financials") / f"reprocess_stuck_financials_{mode.name}_checkpoint.txt")
         checkpoint = set()
         if checkpoint_path.exists():
             checkpoint = {l.strip() for l in checkpoint_path.read_text(encoding="utf-8").splitlines() if l.strip()}

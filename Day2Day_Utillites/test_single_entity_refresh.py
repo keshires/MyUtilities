@@ -35,6 +35,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import refresh_stale_non_public_entities as rf
+from project_paths import output_dir
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
@@ -215,7 +216,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     run_started = datetime.now(timezone.utc)
-    log_path = rf.logs_dir() / f"test_single_entity_refresh_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
+    log_path = rf.logs_dir("verify_single_entity_refresh") / f"test_single_entity_refresh_{run_started.strftime('%Y%m%d_%H%M%S')}.log"
     logger = rf.setup_logging(log_path)
 
     missing = rf.missing_postgres_env()
@@ -294,7 +295,7 @@ def main(argv: list[str] | None = None) -> int:
     logger.info("Submission complete: %s/%s returned OK", ok_count, len(outcomes))
 
     # Persist the before-snapshot immediately so a later --recheck-from is possible.
-    snap_path = log_path.with_suffix(".snapshot.json")
+    snap_path = output_dir("verify_single_entity_refresh") / (log_path.stem + ".snapshot.json")
     snap_path.write_text(
         json.dumps({"before": before, "submit_outcomes": outcomes, "cutoff": cutoff_date.isoformat()}, indent=2),
         encoding="utf-8",
@@ -305,7 +306,7 @@ def main(argv: list[str] | None = None) -> int:
     results = poll_until_refreshed(before, max_wait=args.max_wait, interval=args.interval, logger=logger)
     advanced, changed = print_table(results)
 
-    result_path = log_path.with_suffix(".result.json")
+    result_path = output_dir("verify_single_entity_refresh") / (log_path.stem + ".result.json")
     result_path.write_text(
         json.dumps({
             "cutoff": cutoff_date.isoformat(),
