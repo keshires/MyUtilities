@@ -20,3 +20,16 @@ python -m venv .venv
 ```
 
 Open `Day2Day_Utillites` as the workspace folder in VS Code or Cursor so `${workspaceFolder}` debug configs resolve correctly.
+
+### Utilities catalog & dashboard
+
+The production scripts are cataloged in `Day2Day_Utillites/utilities.yaml`, exposed as
+four Claude Code skills (`.claude/skills/`), and browsable in a read-only dashboard:
+
+```powershell
+cd Day2Day_Utillites
+.\.venv\Scripts\python -m uvicorn dashboard.serve:app --host 127.0.0.1 --port 8021
+# http://127.0.0.1:8021/app/
+```
+
+See [Day2Day_Utillites/Docs/utilities-catalog.md](Day2Day_Utillites/Docs/utilities-catalog.md).
