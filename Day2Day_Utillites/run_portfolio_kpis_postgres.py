@@ -296,7 +296,7 @@ def default_kpi_log_path(options: RunOptions) -> Path:
         mode_parts.append("export")
 
     param = _sanitize_log_filename_fragment(f"{scope}_{'_'.join(mode_parts)}")
-    return logs_dir() / f"{script_stem}_{ts}_{param}.log"
+    return logs_dir("run_portfolio_kpis") / f"{script_stem}_{ts}_{param}.log"
 
 
 async def calculate_portfolio_kpis(
@@ -510,7 +510,7 @@ def main() -> None:
         )
     export_path = args.export_list
     if export_path is not None:
-        export_path = resolve_cli_artifact(export_path, "portfolio")
+        export_path = resolve_cli_artifact(export_path, "run_portfolio_kpis")
     options = RunOptions(
         portfolio_ids_override=override,
         tenant_id=tenant_id,

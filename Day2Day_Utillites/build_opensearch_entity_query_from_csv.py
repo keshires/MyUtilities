@@ -70,11 +70,11 @@ from typing import Sequence
 
 from dotenv import load_dotenv
 
-from project_paths import resolve_cli_artifact
+from project_paths import input_dir, resolve_cli_artifact
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-DEFAULT_BULK_DIR = Path(__file__).resolve().parent / "BulkUplaodFiles"
+DEFAULT_BULK_DIR = input_dir("build_opensearch_query")
 DEFAULT_QUERIES_ENTITIES_PER_FILE = 100
 DEFAULT_OPENSEARCH_RESULT_CAP = 10_000
 OPENSEARCH_FULL_FILENAME = "opensearch_search_full.json"
@@ -370,11 +370,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.output_dir is not None:
-        args.output_dir = resolve_cli_artifact(args.output_dir, "opensearch_queries")
+        args.output_dir = resolve_cli_artifact(args.output_dir, "build_opensearch_query")
     if args.out is not None:
-        args.out = resolve_cli_artifact(args.out, "opensearch_queries")
+        args.out = resolve_cli_artifact(args.out, "build_opensearch_query")
     if args.queries_out is not None:
-        args.queries_out = resolve_cli_artifact(args.queries_out, "opensearch_queries")
+        args.queries_out = resolve_cli_artifact(args.queries_out, "build_opensearch_query")
 
     csv_path = args.csv.expanduser() if args.csv else pick_latest_csv(DEFAULT_BULK_DIR)
     if not csv_path.is_file():
