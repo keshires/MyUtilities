@@ -1,1 +1,148 @@
-<!doctype html><title>Day2Day Utilities</title><p>loading…</p>
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Day2Day Utilities Catalog</title>
+  <style>
+    :root { --bg:#0f1720; --panel:#16212e; --edge:#26374a; --ink:#e6edf3; --muted:#8aa0b4; --accent:#4aa3ff; }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.5 system-ui,Segoe UI,Arial; background:var(--bg); color:var(--ink); }
+    header { padding:14px 20px; border-bottom:1px solid var(--edge); font-weight:600; }
+    .wrap { display:grid; grid-template-columns:360px 1fr; height:calc(100vh - 51px); }
+    .list { overflow:auto; border-right:1px solid var(--edge); padding:12px; }
+    .detail { overflow:auto; padding:20px; }
+    h2.cat { font-size:12px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted); margin:16px 0 6px; }
+    .card { background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:10px 12px; margin-bottom:8px; cursor:pointer; }
+    .card:hover { border-color:var(--accent); }
+    .card.active { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+    .card .name { font-weight:600; }
+    .card .purpose { color:var(--muted); font-size:12px; }
+    .badge { display:inline-block; font-size:11px; padding:1px 7px; border-radius:10px; border:1px solid var(--edge); color:var(--muted); margin-right:4px; }
+    .chip { display:inline-block; font-size:11px; padding:1px 7px; border-radius:4px; background:#1e2c3b; margin:2px 4px 2px 0; }
+    .field { margin:8px 0; }
+    label { display:block; color:var(--muted); font-size:12px; margin-bottom:2px; }
+    input[type=text] { width:100%; background:#0c141d; border:1px solid var(--edge); color:var(--ink); padding:6px 8px; border-radius:6px; }
+    pre.cmd { background:#0c141d; border:1px solid var(--edge); border-radius:6px; padding:10px; overflow-x:auto; white-space:pre-wrap; }
+    button { background:var(--accent); color:#03121f; border:0; padding:6px 12px; border-radius:6px; cursor:pointer; font-weight:600; }
+    table { width:100%; border-collapse:collapse; margin-top:8px; }
+    th,td { text-align:left; padding:6px 8px; border-bottom:1px solid var(--edge); font-size:12px; }
+    a { color:var(--accent); }
+    .safety { border-left:3px solid #d98c00; background:#231b0e; padding:8px 10px; border-radius:0 6px 6px 0; margin:10px 0; }
+    .empty { color:var(--muted); }
+  </style>
+</head>
+<body>
+  <header>Day2Day Utilities — Catalog Dashboard</header>
+  <div class="wrap">
+    <div class="list" id="list"></div>
+    <div class="detail" id="detail"><p class="empty">Select a utility.</p></div>
+  </div>
+  <script>
+    let MANIFEST = null;
+    const byId = {};
+
+    async function boot() {
+      const res = await fetch('/api/utilities');
+      if (!res.ok) { document.getElementById('list').innerHTML =
+        '<p class="empty">Manifest error: ' + (await res.text()) + '</p>'; return; }
+      MANIFEST = await res.json();
+      MANIFEST.utilities.forEach(u => byId[u.id] = u);
+      renderList();
+    }
+
+    function renderList() {
+      const el = document.getElementById('list');
+      el.innerHTML = '';
+      MANIFEST.categories.forEach(cat => {
+        const uts = MANIFEST.utilities.filter(u => u.category === cat.id);
+        if (!uts.length) return;
+        const h = document.createElement('h2'); h.className = 'cat'; h.textContent = cat.name; el.appendChild(h);
+        uts.forEach(u => {
+          const c = document.createElement('div'); c.className = 'card'; c.dataset.id = u.id;
+          c.innerHTML = '<div class="name">' + esc(u.name) + '</div>' +
+            '<div class="purpose">' + esc(u.purpose) + '</div>' +
+            '<div style="margin-top:4px"><span class="badge">' + u.invocation + '</span>' +
+            u.env_required.slice(0,3).map(e => '<span class="badge">' + esc(e) + '</span>').join('') + '</div>';
+          c.onclick = () => select(u.id);
+          el.appendChild(c);
+        });
+      });
+    }
+
+    function buildCommand(u) {
+      const parts = ['python', u.script];
+      u.args.forEach(a => {
+        const v = document.getElementById('arg-' + cssId(a.flag));
+        if (!v) return;
+        if (a.type === 'bool') { if (v.checked) parts.push(a.flag); }
+        else if (v.value.trim() !== '') { parts.push(a.flag, quote(v.value.trim())); }
+      });
+      return parts.join(' ');
+    }
+
+    function select(id) {
+      const u = byId[id];
+      document.querySelectorAll('.card').forEach(c => c.classList.toggle('active', c.dataset.id === id));
+      const d = document.getElementById('detail');
+      let html = '<h2>' + esc(u.name) + '</h2><p class="empty">' + esc(u.purpose) + '</p>';
+      if (u.safety) html += '<div class="safety">⚠ ' + esc(u.safety) + '</div>';
+
+      if (u.args.length) {
+        html += '<h3>Arguments</h3>';
+        u.args.forEach(a => {
+          const id2 = 'arg-' + cssId(a.flag);
+          html += '<div class="field"><label>' + esc(a.flag) +
+            (a.required ? ' *' : '') + (a.choices ? ' (' + a.choices.join('/') + ')' : '') +
+            '</label>';
+          if (a.type === 'bool') html += '<input type="checkbox" id="' + id2 + '" oninput="refreshCmd()">';
+          else html += '<input type="text" id="' + id2 + '" placeholder="' +
+            esc(a.default != null ? String(a.default) : '') + '" oninput="refreshCmd()">';
+          html += (a.help ? '<div class="purpose">' + esc(a.help) + '</div>' : '') + '</div>';
+        });
+      } else {
+        html += '<p class="empty">Configured via .env (no CLI arguments).</p>';
+      }
+
+      html += '<h3>Command</h3><pre class="cmd" id="cmd"></pre><button onclick="copyCmd()">Copy command</button>';
+      html += '<h3>Environment</h3>' + (u.env_required.length
+        ? u.env_required.map(e => '<span class="chip">' + esc(e) + '</span>').join('')
+        : '<span class="empty">none</span>');
+      if (u.docs.length) html += '<h3>Docs</h3><ul>' +
+        u.docs.map(dp => '<li>' + esc(dp) + '</li>').join('') + '</ul>';
+      html += '<h3>Run history</h3><div id="runs" class="empty">loading…</div>';
+      d.innerHTML = html;
+      refreshCmd();
+      loadRuns(id);
+    }
+
+    function refreshCmd() {
+      const id = document.querySelector('.card.active')?.dataset.id; if (!id) return;
+      document.getElementById('cmd').textContent = buildCommand(byId[id]);
+    }
+    function copyCmd() { navigator.clipboard.writeText(document.getElementById('cmd').textContent); }
+
+    async function loadRuns(id) {
+      const res = await fetch('/api/utilities/' + id + '/runs');
+      const box = document.getElementById('runs');
+      if (!res.ok) { box.textContent = 'no run data'; return; }
+      const runs = (await res.json()).runs;
+      if (!runs.length) { box.textContent = 'No runs found yet.'; return; }
+      let t = '<table><tr><th>File</th><th>When (UTC)</th><th>Size</th><th>Summary</th></tr>';
+      runs.forEach(r => {
+        const when = new Date(r.mtime * 1000).toISOString().replace('T',' ').slice(0,19);
+        const sum = r.summary ? esc(JSON.stringify(r.summary).slice(0,120)) : '';
+        t += '<tr><td><a href="/download/' + r.kind + '/' + encodeURIComponent(r.name) +
+          '">' + esc(r.name) + '</a></td><td>' + when + '</td><td>' + r.size +
+          '</td><td>' + sum + '</td></tr>';
+      });
+      box.innerHTML = t + '</table>';
+    }
+
+    const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+    const cssId = s => s.replace(/[^a-z0-9]/gi, '');
+    const quote = v => /\s/.test(v) ? '"' + v + '"' : v;
+    boot();
+  </script>
+</body>
+</html>
