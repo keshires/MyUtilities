@@ -14,7 +14,7 @@ Uses ``TESSERA_POSTGRES_*`` from environment or project root .env (python-dotenv
 Example:
   python export_stale_entities_from_excel.py ^
     --input "C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\StaleEntityRefresh\\Entit_Refresh_Queue_Data_May8th.xlsx"
-  # Default CSV: output/stale_entities/stale_external_ids_<utc>.csv
+  # Default CSV: output/export_stale_entities/stale_external_ids_<utc>.csv
 """
 
 from __future__ import annotations
@@ -174,8 +174,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "CSV path (default: output/stale_entities/stale_external_ids_<utc>.csv). "
-            "Relative paths are under output/stale_entities/."
+            "CSV path (default: output/export_stale_entities/stale_external_ids_<utc>.csv). "
+            "Relative paths are under output/export_stale_entities/."
         ),
     )
     p.add_argument(

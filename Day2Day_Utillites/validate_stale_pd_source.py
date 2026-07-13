@@ -341,7 +341,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--no-refresh-missing", action="store_true",
                    help="Do NOT submit NULL-process-id entities for refresh; just flag them.")
     p.add_argument("--dry-run", action="store_true", help="No API calls (PDs or refresh); DB + CSV only.")
-    p.add_argument("--output", type=Path, default=None, help="CSV path (default under output/stale_entities/).")
+    p.add_argument("--output", type=Path, default=None, help="CSV path (default under output/validate_stale_pd_source/).")
     return p.parse_args(argv)
 
 

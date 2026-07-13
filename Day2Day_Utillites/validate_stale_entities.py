@@ -420,8 +420,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--output",
         type=Path,
         default=None,
-        help="CSV path (default: output/stale_entities/stale_reconcile_<type>_<utc>.csv). "
-        "Relative paths resolve under output/stale_entities/.",
+        help="CSV path (default: output/validate_stale_entities/stale_reconcile_<type>_<utc>.csv). "
+        "Relative paths resolve under output/validate_stale_entities/.",
     )
     return parser.parse_args(argv)
 

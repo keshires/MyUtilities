@@ -282,7 +282,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     p.add_argument("--workers", type=int, default=8, help="Repost workers (default 8).")
     p.add_argument("--checkpoint", default=None, help="Checkpoint file of reposted external_ids (resume).")
     p.add_argument("--recheck-from", type=Path, default=None, help="Snapshot JSON to re-check status transitions.")
-    p.add_argument("--output", type=Path, default=None, help="Per-entity CSV path (default under output/stale_entities/).")
+    p.add_argument("--output", type=Path, default=None, help="Per-entity CSV path (default under output/reprocess_stuck_financials/).")
     return p.parse_args(argv)
 
 
