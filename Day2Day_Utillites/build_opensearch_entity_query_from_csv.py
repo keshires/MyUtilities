@@ -38,13 +38,13 @@ there are more unique ids, multiple JSON files are written: ``queries_1.json``,
 Or pass both ``--out`` and ``--queries-out`` with different paths (single OpenSearch
 file uses ``--size`` as today).
 
-Example (single directory, two artifacts; relative ``--output-dir`` → ``output/opensearch_queries/``):
+Example (single directory, two artifacts; relative ``--output-dir`` → ``output/build_opensearch_query/``):
   python build_opensearch_entity_query_from_csv.py ^
     --tenant-id <your-tenant-id> ^
     --csv "C:\\Github\\MyUtilities\\Day2Day_Utillites\\BulkUplaodFiles\\your_file.csv" ^
     --output-dir my_export_run
 
-Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/opensearch_queries/``):
+Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/build_opensearch_query/``):
   python build_opensearch_entity_query_from_csv.py ^
     --csv "...\\data.csv" ^
     --out opensearch_search.json ^
@@ -306,7 +306,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             f"Write {OPENSEARCH_FULL_FILENAME!r} (all ids), "
             f"{OPENSEARCH_TERMS_CHUNK_BASENAME!r} chunk(s) (max ids per file = --queries-entities-per-file), "
             f"and {QUERIES_PAYLOAD_FILENAME!r} payload chunk(s). Do not combine with --out or --queries-out. "
-            "Relative paths are placed under output/opensearch_queries/ at the project root."
+            "Relative paths are placed under output/build_opensearch_query/ at the project root."
         ),
     )
     p.add_argument(
@@ -315,7 +315,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Write OpenSearch _search JSON only to this path (separate from --queries-out). "
-            "Relative paths go under output/opensearch_queries/."
+            "Relative paths go under output/build_opensearch_query/."
         ),
     )
     p.add_argument(
@@ -325,7 +325,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             'Write {"queries": [...]} payload only (max 100 entities per file; '
             "chunked as stem_1.json, …). Use with --out for two explicit files, or use --output-dir. "
-            "Relative paths go under output/opensearch_queries/."
+            "Relative paths go under output/build_opensearch_query/."
         ),
     )
     p.add_argument(
