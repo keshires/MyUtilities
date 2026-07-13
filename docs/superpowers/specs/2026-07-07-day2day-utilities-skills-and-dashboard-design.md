@@ -15,13 +15,19 @@ plus a FastAPI dashboard served at `/app/`).
 
 ## Scope
 
-### In scope — the 9 production utilities
+### In scope — the 10 production utilities
+
+> Updated 2026-07-13: originally scoped at 9. During implementation a 10th
+> utility, `test_single_entity_refresh.py` (single-entity refresh verifier),
+> was folded into the `stale-entity-refresh` family — see the plan handoff note.
+> The manifest and dashboard therefore expose 10 utilities.
 
 | Script | Category |
 |--------|----------|
 | `refresh_stale_non_public_entities.py` | stale-entity-refresh |
 | `validate_stale_entities.py` | stale-entity-refresh |
 | `export_stale_entities_from_excel.py` | stale-entity-refresh |
+| `test_single_entity_refresh.py` | stale-entity-refresh |
 | `run_portfolio_kpis_postgres.py` | portfolio-kpi-ops |
 | `portfolio_kpi_metrics_postgres.py` | portfolio-kpi-ops |
 | `financials_delete_custom_entity.py` | edfx-entity-ops |
@@ -193,9 +199,9 @@ full arg tables (avoids drift).
 No automated test suite exists in this repo; verification is manual and mirrors how
 the existing scripts are validated:
 
-1. Dashboard starts; `GET /api/utilities` returns all 9 utilities under the correct
+1. Dashboard starts; `GET /api/utilities` returns all 10 utilities under the correct
    4 families.
-2. UI renders the 9 cards; clicking one builds a correct command string in the arg form.
+2. UI renders the 10 cards; clicking one builds a correct command string in the arg form.
 3. **Run History** populates for `stale-entity-refresh` and `portfolio-kpi-ops`
    (both already have files under `logs/` and `output/`).
 4. Each skill's copy-run commands match the manifest and the script's real args.
