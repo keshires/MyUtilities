@@ -62,7 +62,7 @@
           const c = document.createElement('div'); c.className = 'card'; c.dataset.id = u.id;
           c.innerHTML = '<div class="name">' + esc(u.name) + '</div>' +
             '<div class="purpose">' + esc(u.purpose) + '</div>' +
-            '<div style="margin-top:4px"><span class="badge">' + u.invocation + '</span>' +
+            '<div style="margin-top:4px"><span class="badge">' + esc(u.invocation) + '</span>' +
             u.env_required.slice(0,3).map(e => '<span class="badge">' + esc(e) + '</span>').join('') + '</div>';
           c.onclick = () => select(u.id);
           el.appendChild(c);
@@ -93,7 +93,7 @@
         u.args.forEach(a => {
           const id2 = 'arg-' + cssId(a.flag);
           html += '<div class="field"><label>' + esc(a.flag) +
-            (a.required ? ' *' : '') + (a.choices ? ' (' + a.choices.join('/') + ')' : '') +
+            (a.required ? ' *' : '') + (a.choices ? ' (' + esc(a.choices.join('/')) + ')' : '') +
             '</label>';
           if (a.type === 'bool') html += '<input type="checkbox" id="' + id2 + '" oninput="refreshCmd()">';
           else html += '<input type="text" id="' + id2 + '" placeholder="' +
@@ -109,7 +109,14 @@
         ? u.env_required.map(e => '<span class="chip">' + esc(e) + '</span>').join('')
         : '<span class="empty">none</span>');
       if (u.docs.length) html += '<h3>Docs</h3><ul>' +
-        u.docs.map(dp => '<li>' + esc(dp) + '</li>').join('') + '</ul>';
+        u.docs.map(dp => '<li><a href="' + esc(dp) + '">' + esc(dp) + '</a></li>').join('') + '</ul>';
+      if (u.outputs && (u.outputs.logs_glob || u.outputs.output_glob || u.outputs.summary_suffix)) {
+        html += '<h3>Outputs</h3><ul>';
+        if (u.outputs.logs_glob) html += '<li>logs/ ' + esc(u.outputs.logs_glob) + '</li>';
+        if (u.outputs.output_glob) html += '<li>output/ ' + esc(u.outputs.output_glob) + '</li>';
+        if (u.outputs.summary_suffix) html += '<li>summary sidecar: *' + esc(u.outputs.summary_suffix) + '</li>';
+        html += '</ul>';
+      }
       html += '<h3>Run history</h3><div id="runs" class="empty">loading…</div>';
       d.innerHTML = html;
       refreshCmd();
@@ -132,7 +139,7 @@
       runs.forEach(r => {
         const when = new Date(r.mtime * 1000).toISOString().replace('T',' ').slice(0,19);
         const sum = r.summary ? esc(JSON.stringify(r.summary).slice(0,120)) : '';
-        t += '<tr><td><a href="/download/' + r.kind + '/' + encodeURIComponent(r.name) +
+        t += '<tr><td><a href="/download/' + encodeURIComponent(r.kind) + '/' + encodeURIComponent(r.name) +
           '">' + esc(r.name) + '</a></td><td>' + when + '</td><td>' + r.size +
           '</td><td>' + sum + '</td></tr>';
       });
