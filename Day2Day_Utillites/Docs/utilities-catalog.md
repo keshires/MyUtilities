@@ -15,3 +15,15 @@ surfaced two ways:
   ```
 
 Load-test / Spark POC scripts have been moved to `archive/` (see `archive/README.md`).
+
+## File layout convention
+
+Each utility reads and writes under its own per-utility folder:
+
+- Inputs:  `input/<utility>/`
+- Outputs: `output/<utility>/`
+- Logs / run history: `logs/<utility>/`
+
+The folder name matches the utility (e.g. `refresh_stale_entities`,
+`run_portfolio_kpis`, `build_opensearch_query`). See `utilities.yaml` for each
+utility's exact globs.

@@ -15,7 +15,7 @@ Then run the stored procedure:
 `python run_portfolio_kpis_postgres.py --tenant-id <TENANT>`
 Target specific portfolios with `--portfolio-id <ID>` (repeatable) or `--portfolio-ids 1,2,3`;
 export the resolved list with `--export-list <file.csv>`.
-→ log in `logs/run_portfolio_kpis_postgres_*`, optional CSV in `output/portfolio/`.
+→ log in `logs/run_portfolio_kpis/`, optional CSV in `output/run_portfolio_kpis/`.
 
 ## Analyze the KPI update log (read-only)
 `python portfolio_kpi_metrics_postgres.py --start "2026-05-20 00:00:00" --end "2026-05-21 00:00:00" --report all`

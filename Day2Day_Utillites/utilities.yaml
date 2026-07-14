@@ -28,7 +28,7 @@ utilities:
         help: "Include an id only if no entity row was updated within this many days."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
-      output_glob: "stale_entities/stale_external_ids_*"
+      output_glob: "export_stale_entities/stale_external_ids_*"
     docs: []
     safety: "Read-only against prod Postgres."
 
@@ -57,8 +57,8 @@ utilities:
         help: "CSV path. Default output/stale_entities/stale_reconcile_<type>_<utc>.csv."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
-      logs_glob: "validate_stale_entities_*"
-      output_glob: "stale_entities/stale_reconcile_*"
+      logs_glob: "validate_stale_entities/validate_stale_entities_*"
+      output_glob: "validate_stale_entities/stale_reconcile_*"
       summary_suffix: ".summary.json"
     docs: ["docs/superpowers/specs/2026-07-02-stale-entity-reconciliation-export-design.md"]
     safety: "Read-only against prod Postgres. Report, not a pass/fail gate."
@@ -121,7 +121,7 @@ utilities:
         help: "Include all matching entities, not only those stale by --date-filter."
     env_required: [MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL, TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
-      logs_glob: "refresh_stale_entities_*"
+      logs_glob: "refresh_stale_entities/refresh_stale_entities_*"
       summary_suffix: ".summary.json"
     docs: ["docs/superpowers/specs/2026-07-02-selectable-staleness-date-column-design.md"]
     safety: "Writes to prod via Tessera refreshEntities. ALWAYS run --dry-run first."
@@ -158,7 +158,8 @@ utilities:
         help: "Skip submit; re-compare against a saved before-snapshot JSON."
     env_required: [MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL, TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
-      logs_glob: "test_single_entity_refresh_*"
+      logs_glob: "verify_single_entity_refresh/test_single_entity_refresh_*"
+      output_glob: "verify_single_entity_refresh/*"
     docs: []
     safety: "Submits real refreshes for a handful of entities. Keep --count small."
 
@@ -183,8 +184,8 @@ utilities:
         help: "Write portfolio_id column to this CSV (relative → output/portfolio/)."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
-      logs_glob: "run_portfolio_kpis_postgres_*"
-      output_glob: "portfolio/*"
+      logs_glob: "run_portfolio_kpis/run_portfolio_kpis_postgres_*"
+      output_glob: "run_portfolio_kpis/*"
     docs: ["Day2Day_Utillites/Docs/run-portfolio-kpis-postgres.md"]
     safety: "Executes a stored procedure that recomputes KPIs on prod. Use --list-only to preview."
 
@@ -236,7 +237,8 @@ utilities:
         default: 60
         help: "Request timeout seconds."
     env_required: [EDFX_TOKEN, EDFX_DELETE_ENTITY_IDS, EDFX_COOKIE]
-    outputs: {}
+    outputs:
+      logs_glob: "delete_custom_entity/delete_custom_entity_*"
     docs: []
     safety: "DESTRUCTIVE: permanently deletes entities on prod. Double-check ids first."
 
@@ -286,7 +288,7 @@ utilities:
         help: "Max size in generated OpenSearch bodies under --output-dir."
     env_required: [OPENSEARCH_TENANT_ID]
     outputs:
-      output_glob: "opensearch_queries/*"
+      output_glob: "build_opensearch_query/*"
     docs: []
     safety: "Local file generation only. No network or DB."
 
@@ -299,6 +301,7 @@ utilities:
     invocation: env-config
     args: []
     env_required: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION]
-    outputs: {}
+    outputs:
+      logs_glob: "dynamodb_batch_update/dynamodb_batch_update_*"
     docs: []
     safety: "DESTRUCTIVE when DRY_RUN=False. Edit the in-script config constants; keep DRY_RUN=True until verified."

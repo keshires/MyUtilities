@@ -20,6 +20,7 @@ keys, `CURRENT_VALUE_TO_FIND` → `NEW_VALUE_TO_SET`, `ENVIRONMENT`, `DRY_RUN`),
 ## Safety
 DESTRUCTIVE when `DRY_RUN = False` — it updates prod DynamoDB rows in parallel. Never
 skip the dry-run. Confirm the record count matches expectations before the real run.
+Runs now log to `logs/dynamodb_batch_update/`.
 
 ## Prereqs
 AWS credentials resolvable by boto3 (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`,

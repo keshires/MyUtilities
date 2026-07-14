@@ -32,4 +32,6 @@ cd Day2Day_Utillites
 # http://127.0.0.1:8021/app/
 ```
 
+Each utility reads/writes under per-utility folders: `input/<utility>/`, `output/<utility>/`, `logs/<utility>/`.
+
 See [Day2Day_Utillites/Docs/utilities-catalog.md](Day2Day_Utillites/Docs/utilities-catalog.md).

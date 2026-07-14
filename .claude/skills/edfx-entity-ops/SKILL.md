@@ -12,6 +12,7 @@ Canonical args/env are in `Day2Day_Utillites/utilities.yaml`.
 `python financials_delete_custom_entity.py --entity-id <uuid[,uuid...]> --token <bearer>`
 Falls back to `EDFX_DELETE_ENTITY_IDS` / `EDFX_TOKEN` from `.env` when flags are omitted.
 Deletes are permanent — confirm the id list before running.
+Runs now log to `logs/delete_custom_entity/`.
 
 ## Check process statuses (read-only, .env-configured)
 `python EDFX_ProcessStatus.py`
@@ -21,7 +22,7 @@ Configure the run via `.env` (`MOODYS_SSO_*`, `EDFX_BASE_URL`, `EDFX_OUTPUT_FOLD
 ## Build OpenSearch queries from a CSV (local only)
 `python build_opensearch_entity_query_from_csv.py --csv <file.csv> --output-dir queries`
 Reads a `companyIdentifier` column; writes full + chunked `_search` JSON and a queries
-payload under `output/opensearch_queries/`. Use `--distinct-count` to inspect counts
+payload under `output/build_opensearch_query/`. Use `--distinct-count` to inspect counts
 without writing files. Do not combine `--output-dir` with `--out`/`--queries-out`.
 
 ## Prereqs
