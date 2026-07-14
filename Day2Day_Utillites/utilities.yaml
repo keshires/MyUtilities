@@ -18,10 +18,10 @@ utilities:
     invocation: cli
     args:
       - flag: --input
-        default: "inputfiles/StaleEntityRefresh/Entit_Refresh_Queue_Data_May8th.xlsx"
+        default: "input/export_stale_entities/Entit_Refresh_Queue_Data_May8th.xlsx"
         help: "Excel file containing an external_id column."
       - flag: --output
-        help: "CSV path. Default output/stale_entities/stale_external_ids_<utc>.csv."
+        help: "CSV path. Default output/export_stale_entities/stale_external_ids_<utc>.csv."
       - flag: --stale-days
         type: int
         default: 10
@@ -54,7 +54,7 @@ utilities:
         type: int
         help: "Cap rows written (testing)."
       - flag: --output
-        help: "CSV path. Default output/stale_entities/stale_reconcile_<type>_<utc>.csv."
+        help: "CSV path. Default output/validate_stale_entities/stale_reconcile_<type>_<utc>.csv."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
       logs_glob: "validate_stale_entities/validate_stale_entities_*"
@@ -181,7 +181,7 @@ utilities:
         type: bool
         help: "Log the id list; do not call calculate_portfolio_kpis."
       - flag: --export-list
-        help: "Write portfolio_id column to this CSV (relative → output/portfolio/)."
+        help: "Write portfolio_id column to this CSV (relative → output/run_portfolio_kpis/)."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
       logs_glob: "run_portfolio_kpis/run_portfolio_kpis_postgres_*"
@@ -263,7 +263,7 @@ utilities:
     invocation: cli
     args:
       - flag: --csv
-        help: "CSV path. Default: newest *.csv under BulkUplaodFiles."
+        help: "CSV path. Default: newest *.csv under input/build_opensearch_query/."
       - flag: --tenant-id
         help: "tenantId.keyword value. Falls back to OPENSEARCH_TENANT_ID env."
       - flag: --size
@@ -271,7 +271,7 @@ utilities:
         default: 10
         help: "Search size."
       - flag: --output-dir
-        help: "Write full + chunked + payload JSON here (relative → output/opensearch_queries/)."
+        help: "Write full + chunked + payload JSON here (relative → output/build_opensearch_query/)."
       - flag: --out
         help: "Write OpenSearch _search JSON only to this path."
       - flag: --queries-out
