@@ -13,7 +13,7 @@ Uses ``TESSERA_POSTGRES_*`` from environment or project root .env (python-dotenv
 
 Example:
   python export_stale_entities_from_excel.py ^
-    --input "C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\StaleEntityRefresh\\Entit_Refresh_Queue_Data_May8th.xlsx"
+    --input "C:\\Github\\MyUtilities\\Day2Day_Utillites\\input\\export_stale_entities\\Entit_Refresh_Queue_Data_May8th.xlsx"
   # Default CSV: output/export_stale_entities/stale_external_ids_<utc>.csv
 """
 

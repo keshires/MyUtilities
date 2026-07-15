@@ -41,7 +41,7 @@ file uses ``--size`` as today).
 Example (single directory, two artifacts; relative ``--output-dir`` → ``output/build_opensearch_query/``):
   python build_opensearch_entity_query_from_csv.py ^
     --tenant-id <your-tenant-id> ^
-    --csv "C:\\Github\\MyUtilities\\Day2Day_Utillites\\BulkUplaodFiles\\your_file.csv" ^
+    --csv "C:\\Github\\MyUtilities\\Day2Day_Utillites\\input\\build_opensearch_query\\your_file.csv" ^
     --output-dir my_export_run
 
 Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/build_opensearch_query/``):
@@ -50,8 +50,8 @@ Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/bui
     --out opensearch_search.json ^
     --queries-out queries_payload.json
 
-If ``--csv`` is omitted, the newest ``*.csv`` under ``BulkUplaodFiles`` next to
-this script is used (folder name matches your path: BulkUplaodFiles).
+If ``--csv`` is omitted, the newest ``*.csv`` under ``input/build_opensearch_query/`` next to
+this script is used.
 
 Distinct count only (no JSON written)::
 
@@ -287,7 +287,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--csv",
         type=Path,
         default=None,
-        help="Path to CSV. Default: newest *.csv under BulkUplaodFiles beside this script.",
+        help="Path to CSV. Default: newest *.csv under input/build_opensearch_query/ beside this script.",
     )
     p.add_argument(
         "--tenant-id",

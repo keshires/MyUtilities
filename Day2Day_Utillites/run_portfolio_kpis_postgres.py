@@ -7,7 +7,7 @@ Config: TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT (5432), TESSERA_POSTGRES_DB
 TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD — from env or .env (python-dotenv).
 
 Optional env: PORTFOLIO_TABLE, PORTFOLIO_ID_COLUMN (id), PORTFOLIO_TENANT_COLUMN (Tenant_Id),
-KPI_FUNCTION_SCHEMA (public), KPI_LOG_FILE (else ``logs/run_portfolio_kpis_postgres_*.log`` under the project root; relative paths are from project root).
+KPI_FUNCTION_SCHEMA (public), KPI_LOG_FILE (else ``logs/run_portfolio_kpis/run_portfolio_kpis_postgres_*.log`` under the project root; relative paths are from project root).
 
 Requires: asyncpg; optional: python-dotenv. Short doc: Docs/run-portfolio-kpis-postgres.md
 """
@@ -498,7 +498,7 @@ def main() -> None:
         metavar="CSV_PATH",
         help=(
             "Write portfolio_id column to this CSV after ids are resolved. "
-            "Relative paths go under output/portfolio/ at the project root."
+            "Relative paths go under output/run_portfolio_kpis/ at the project root."
         ),
     )
     args = parser.parse_args()
