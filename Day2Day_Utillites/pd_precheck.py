@@ -295,3 +295,111 @@ class ApiEntityPdResolver(EntityPdResolver):
                 eid = ent.get("entityId")
                 out[id_map.get(eid, eid)] = parse_pds_entity(ent)
         return out
+
+
+# ---------------------------------------------------------------------------
+# Full pds -> mapping -> orphan flow (per operator rules):
+#   private/custom: pds by entityId (custom composite). If pds returns "no data",
+#   fall back to /entity/v1/mapping (by externalId). Empty mapping => orphaned
+#   (delete-candidate). public: DB-only (see classify_public).
+# ---------------------------------------------------------------------------
+
+# Public entities count as "valid" for refresh currency when legal status is
+# null/empty or Active; other statuses (bankruptcy, dissolved, ...) are excluded.
+VALID_PUBLIC_STATUSES = {"active"}
+
+
+@dataclass(frozen=True)
+class EntityStatus:
+    pd: "PdResult | None"   # pds result when found; None when pds returned no data
+    orphaned: bool          # pds no-data AND mapping empty
+
+
+def classify_status(
+    entity_type: str, status: "EntityStatus | None", ref_month_start: date
+) -> Classification:
+    """Decide POST/SKIP for a private/custom entity from its pds+mapping status."""
+    if status is None:
+        return Classification("pds_unknown", "POST", "no status; posting conservatively")
+    if status.orphaned:
+        return Classification("orphaned", "SKIP", "not found in pds or mapping; delete-candidate")
+    if status.pd is None:
+        return Classification("mapped_no_pd", "SKIP", "exists (mapping) but no pds PD")
+    if not status.pd.has_pd:
+        return Classification("no_pd", "SKIP", f"no PD ({status.pd.message or 'bankrupt/no pd'})")
+    if entity_type == "custom":
+        # custom asOfDate is the financials-statement date, not the publication date;
+        # a computable pd means a refresh will publish a current 1st-of-month PD.
+        return Classification("refreshable", "POST", "custom PD computable; refresh will publish")
+    if is_pd_current(entity_type, status.pd.as_of_date, ref_month_start):
+        return Classification("current_pd", "POST", "model has a current-period PD")
+    return Classification("source_stale", "SKIP", "model's latest PD predates the current period")
+
+
+def classify_public(
+    pd_last_known_date: date | None, legal_status: str | None, ref_month_start: date
+) -> Classification:
+    """Public entities are report-only. Fresh = a current-month PD and a valid
+    (null/Active) legal status; otherwise stale or excluded. Never POST."""
+    status = (legal_status or "").strip().lower()
+    if status not in ({""} | VALID_PUBLIC_STATUSES):
+        return Classification("public_invalid_status", "SKIP", f"legal status {legal_status!r}")
+    if pd_last_known_date is not None and pd_last_known_date >= ref_month_start:
+        return Classification("public_fresh", "SKIP", "current-month PD present")
+    return Classification("public_stale", "SKIP", "no current-month PD (report only)")
+
+
+class PdMappingResolver:
+    """Resolves each private/custom entity to an EntityStatus via pds then mapping.
+
+    ``pds_post_batch(entity_ids) -> list[dict]`` and ``mapping_lookup(external_ids)
+    -> set[str]`` (external_ids that mapping found) are injected for offline testing;
+    the scripts supply SSO-authenticated implementations.
+    """
+
+    def __init__(
+        self,
+        pds_post_batch: "Callable[[list[str]], list[dict]]",
+        mapping_lookup: "Callable[[list[str]], set[str]]",
+        batch_size: int = 200,
+    ) -> None:
+        self._pds = pds_post_batch
+        self._mapping = mapping_lookup
+        self._bs = max(1, batch_size)
+
+    def resolve(self, rows: list[StaleRow], entity_type: str) -> dict[str, EntityStatus]:
+        id_map: dict[str, str] = {}
+        ordered: list[str] = []
+        no_data: set[str] = set()
+        for r in rows:
+            eid = pds_entity_id(r, entity_type)
+            if eid is None:
+                no_data.add(r.external_id)  # custom w/o financials_process_id -> can't query pds
+                continue
+            if eid not in id_map:
+                id_map[eid] = r.external_id
+                ordered.append(eid)
+
+        pds_res: dict[str, PdResult] = {}
+        for i in range(0, len(ordered), self._bs):
+            for ent in self._pds(ordered[i : i + self._bs]):
+                ext = id_map.get(ent.get("entityId"), ent.get("entityId"))
+                pr = parse_pds_entity(ent)
+                if pr.as_of_date is None and not pr.has_pd:
+                    no_data.add(ext)          # "no data found" message
+                else:
+                    pds_res[ext] = pr
+
+        mapped: set[str] = set()
+        nd = list(no_data)
+        for i in range(0, len(nd), self._bs):
+            mapped |= self._mapping(nd[i : i + self._bs])
+
+        out: dict[str, EntityStatus] = {}
+        for r in rows:
+            ext = r.external_id
+            if ext in pds_res:
+                out[ext] = EntityStatus(pd=pds_res[ext], orphaned=False)
+            elif ext in no_data:
+                out[ext] = EntityStatus(pd=None, orphaned=ext not in mapped)
+        return out
