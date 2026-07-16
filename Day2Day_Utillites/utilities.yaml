@@ -167,21 +167,24 @@ utilities:
     name: PD Pre-Check Report
     script: validate_pd_precheck.py
     category: stale-entity-refresh
-    purpose: "Classify stale entities (by pd_last_known_date) as POST/SKIP using entity + peer-group PD, to avoid futile refreshEntities posts. Read-only."
+    purpose: "Classify stale entities (by pd_last_known_date) into refreshable/orphaned/no-pd buckets using the authoritative /edfx/v1/entities/pds check (private=externalId, custom=externalId-financialsProcessId), with /entity/v1/mapping fallback (empty => orphaned/delete-candidate). Public is DB-only (fresh = current-month PD + Active/null status). Read-only; never posts."
     invocation: cli
     args:
       - flag: --entity-type
         required: true
         choices: [custom, private, public]
-        help: "custom, private, or public (public is report-only)."
+        help: "custom, private, or public (public is report-only, DB-only)."
       - flag: --date-filter
         help: "Stale cutoff YYYY-MM-DD. Default first of current month."
-    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+      - flag: --limit
+        type: int
+        help: "Cap entities (testing/sampling)."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD, MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL]
     outputs:
       output_glob: "validate_pd_precheck/*"
       summary_suffix: ".summary.json"
     docs: ["docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md"]
-    safety: "Read-only against prod Postgres. Never posts."
+    safety: "Read-only (Postgres + pds/mapping GETs). Never posts. SSO needed for private/custom (pds/mapping); public needs only Postgres."
 
   # ---------------- portfolio-kpi-ops ----------------
   - id: run-portfolio-kpis-postgres

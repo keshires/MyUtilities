@@ -37,11 +37,14 @@ auto-targets `2026-08-01`; override with `--date-filter YYYY-MM-01`).
 5. **Spot-verify (optional):** `python test_single_entity_refresh.py --entity-type custom --count 10`
    — submits a few individually and polls until `pd_last_known_date` advances.
 
-**Optional PD pre-filter** (skip futile posts): add `--pd-precheck` to the refresh command (needs
-`--stale-date-column pd_last_known_date`) to post only genuine candidates — skips entities already
-fresh or whose peer group already has the PD. `validate_pd_precheck.py --entity-type <t>` reports the
-POST/SKIP split read-only (`public` is report-only). Peer-group PD currently uses a DB `MAX(peerId)`
-fallback; the external-source resolver is a documented stub pending its endpoint.
+**PD pre-check report** — `validate_pd_precheck.py --entity-type custom|private|public` (read-only):
+classifies the stale set via the authoritative `/edfx/v1/entities/pds` check (custom uses
+`externalId-financialsProcessId` from entity_custom_data), falling back to `/entity/v1/mapping`;
+entities in **neither are orphaned** → written to a `.orphaned.csv` delete-candidate list. Buckets:
+`refreshable`/`current_pd` (POST) vs `no_pd`/`source_stale`/`mapped_no_pd`/`orphaned` (SKIP); public is
+DB-only/report-only (`public_fresh`/`public_stale`). Needs SSO for private/custom; `--limit` to sample.
+See `docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md`.
+(The refresh's own `--pd-precheck` flag still uses the DB-max peer heuristic to filter posts.)
 
 Outputs: `output/<script>/…` (CSVs, snapshots) and `logs/<script>/…` (run log + `.summary.json`).
 

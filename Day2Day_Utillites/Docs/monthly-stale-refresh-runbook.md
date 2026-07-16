@@ -47,13 +47,18 @@ Ensure `.env` also has `TESSERA_POSTGRES_*` (validate) and `MOODYS_SSO_USERNAME`
 Writes a CSV under `output\validate_stale_entities\` + a `.summary.json` (with the count) under
 `logs\validate_stale_entities\`. Restrict to one tenant with `--tenant-id <id>`.
 
-### 1b. (Optional) PD pre-check report — see what's worth refreshing
+### 1b. (Optional) PD pre-check report — see what's worth refreshing / what's orphaned
 ```
-.\.venv\Scripts\python validate_pd_precheck.py --entity-type custom
+.\.venv\Scripts\python validate_pd_precheck.py --entity-type custom   # or private / public
 ```
-Classifies the stale set POST vs SKIP (already-fresh / matches peer-group PD), using each
-entity's PD and its peer group's PD. Add `--pd-precheck` to the refresh command (step 3) to
-post only the POST candidates and skip futile ones. `public` is report-only.
+Classifies the stale set using the authoritative PD check:
+- **private/custom** → `/edfx/v1/entities/pds` (custom uses `externalId-financialsProcessId`);
+  if pds has no data → `/entity/v1/mapping`; empty ⇒ **orphaned** (written to a separate
+  `.orphaned.csv` delete-candidate list). Buckets: `refreshable`/`current_pd` (POST),
+  `no_pd`/`source_stale`/`mapped_no_pd`/`orphaned` (SKIP).
+- **public** → DB-only, report-only: `public_fresh` (current-month PD + Active/null status)
+  vs `public_stale`.
+Needs SSO env (private/custom). Add `--limit N` to sample. Read-only — never posts.
 
 ### 2. Dry-run the refresh (no posting; confirms the count)
 ```
