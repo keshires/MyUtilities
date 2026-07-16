@@ -145,3 +145,36 @@ distinct peerIds ──► PeerGroupPdResolver.resolve() ──► {peerId: grou
 - Auto-refreshing peer groups / driver entities (only classify + post individual entities).
 - Changing the existing `updated_date` behavior or other utilities.
 - Any public-entity posting (report-only, always).
+
+---
+
+## Addendum (2026-07-16) — authoritative pds/mapping/orphan resolver
+
+The §8 external resolver is now defined. The peer-group `MAX(peerId)` heuristic is
+superseded for the POST/SKIP decision by the **authoritative PD check**:
+
+- **private** → `POST /edfx/v1/entities/pds` with `entityId = external_id`.
+- **custom** → same endpoint with `entityId = "<external_id>-<financials_process_id>"`
+  (`financials_process_id` from `public.entity_custom_data`, joined on `external_id`).
+- Response per entity: `asOfDate` (+ `pd` when computable) or a `message` ("No data found").
+- **pds "no data"** → `POST /entity/v1/mapping` (`queries` by `entityId` and
+  `customEntityIdentifier`). Empty response ⇒ **orphaned** (delete-candidate; exported to
+  a separate `.orphaned.csv`). Confirmed by the operator: not-in-pds-and-not-in-mapping is
+  orphaned even if a stale DB `pd_last_known_date` row lingers.
+- **public** → DB-only: fresh if `pd_last_known_date` is in the current month **and**
+  `legal_status` is null/Active; report-only (never posted).
+
+Classification categories (`pd_precheck.classify_status` / `classify_public`):
+`refreshable`/`current_pd` → POST; `no_pd`, `source_stale`, `mapped_no_pd`, `orphaned`,
+`public_fresh`, `public_stale`, `public_invalid_status` → SKIP (public never posts).
+
+Currency nuance: for **custom**, pds `asOfDate` is the financials-statement date (not the
+publication date), so a computable `pd` (not `asOfDate`) is the POST signal; for **private**,
+`asOfDate` in the current month is the signal.
+
+Resolver (`PdMappingResolver`) takes injected `pds_post_batch` + `mapping_lookup`, so the pure
+logic is unit-tested offline; the scripts supply SSO-authenticated batched implementations.
+Mapping "found" is detected by the id appearing in the batched response body.
+
+Building blocks retained: `DbMaxPeerGroupPdResolver` (offline/tests) and the peer-group
+classifier remain in `pd_precheck.py` as reusable, tested code.
