@@ -56,8 +56,11 @@ def _stale_query(entity_type: str) -> str:
     else:  # public
         data_type = "e.data_type <> 'Private'"
         custom_clause = ""
+    # DISTINCT ON (external_id): one row per entity (they can appear across tenants),
+    # keeping the freshest PD row — matches the refresh script's DISTINCT external_id.
     return f"""
-    SELECT e.external_id, e.tenant_id, e.pd_last_known_date,
+    SELECT DISTINCT ON (e.external_id)
+           e.external_id, e.tenant_id, e.pd_last_known_date,
            e.entity_data->>'peerId' AS peer_id,
            COALESCE(e.entity_data->>'isPeerDriven','') AS is_peer_driven
     FROM public.entity e
@@ -67,6 +70,7 @@ def _stale_query(entity_type: str) -> str:
       AND (NULLIF(e.entity_data->>'financialStmtDate','') IS NULL
            OR NULLIF(e.entity_data->>'financialStmtDate','')::timestamp >= (NOW()-INTERVAL '3 years'))
       AND (e.pd_last_known_date IS NULL OR e.pd_last_known_date < $1::timestamp)
+    ORDER BY e.external_id, e.pd_last_known_date DESC NULLS LAST
     """
 
 

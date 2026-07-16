@@ -1448,14 +1448,16 @@ def main(argv: list[str] | None = None) -> int:
         async def _fetch_precheck_rows() -> list["pc.StaleRow"]:
             conn = await pg_connect()
             try:
-                q = f"""SELECT e.external_id, e.tenant_id, e.pd_last_known_date,
+                q = f"""SELECT DISTINCT ON (e.external_id)
+                               e.external_id, e.tenant_id, e.pd_last_known_date,
                                e.entity_data->>'peerId' AS peer_id,
                                COALESCE(e.entity_data->>'isPeerDriven','') AS ipd
                         FROM public.entity e
                         WHERE e.data_type='Private' AND {entity_mode.custom_id_clause}
                           AND e.external_id IS NOT NULL AND {tenant_clause(tenant_id=tenant_id)}
                           {financial_stmt_clause(financial_max_age_years)}
-                          {stale_date_clause(stale_date_column)}"""
+                          {stale_date_clause(stale_date_column)}
+                        ORDER BY e.external_id, e.pd_last_known_date DESC NULLS LAST"""
                 params = [
                     datetime.combine(date_filter, datetime.min.time()),
                     tenant_id if tenant_id else excluded,
