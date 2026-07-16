@@ -5,6 +5,8 @@ See docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.m
 """
 from __future__ import annotations
 
+from abc import ABC, abstractmethod
+from collections.abc import Callable, Iterable
 from dataclasses import dataclass
 from datetime import date
 
@@ -77,3 +79,78 @@ class StaleRow:
     pd_last_known_date: date | None
     peer_id: str | None
     is_peer_driven: bool
+
+
+class PeerGroupPdResolver(ABC):
+    """Resolves each peer group's authoritative latest PD date."""
+
+    @abstractmethod
+    def resolve(self, peer_ids: Iterable[str]) -> dict[str, date | None]:
+        ...
+
+
+class DbMaxPeerGroupPdResolver(PeerGroupPdResolver):
+    """Fallback resolver: group PD date = MAX(pd_last_known_date) over peerId.
+
+    ``fetch(ids)`` returns ``[(peer_id, max_pd_date), ...]`` — injected so this is
+    unit-testable offline and swappable for a live asyncpg query in the scripts.
+    """
+
+    def __init__(self, fetch: Callable[[list[str]], list[tuple[str, date | None]]]) -> None:
+        self._fetch = fetch
+
+    def resolve(self, peer_ids: Iterable[str]) -> dict[str, date | None]:
+        ids = [pid for pid in dict.fromkeys(peer_ids) if pid]
+        if not ids:
+            return {}
+        return {pid: pd for pid, pd in self._fetch(ids)}
+
+
+class ApiPeerGroupPdResolver(PeerGroupPdResolver):
+    """Authoritative external-source resolver. Endpoint/auth not wired yet (spec §8)."""
+
+    def __init__(self, base_url: str, token_provider: Callable[[], str] | None = None) -> None:
+        self.base_url = base_url
+        self.token_provider = token_provider
+
+    def resolve(self, peer_ids: Iterable[str]) -> dict[str, date | None]:
+        raise NotImplementedError(
+            "External peer-group PD endpoint not wired yet; use DbMaxPeerGroupPdResolver."
+        )
+
+
+def classify_all(
+    rows: list[StaleRow],
+    resolver: PeerGroupPdResolver,
+    entity_type: str,
+    ref_month_start: date,
+) -> list[tuple[StaleRow, Classification]]:
+    """Classify every row, batch-resolving peer-group PD dates once."""
+    group = resolver.resolve([r.peer_id for r in rows if r.peer_id]) if rows else {}
+    return [
+        (
+            r,
+            classify(
+                entity_type=entity_type,
+                is_peer_driven=r.is_peer_driven,
+                entity_pd=r.pd_last_known_date,
+                group_pd=(group.get(r.peer_id) if r.peer_id else None),
+                ref_month_start=ref_month_start,
+            ),
+        )
+        for r in rows
+    ]
+
+
+def post_ids(
+    rows: list[StaleRow],
+    resolver: PeerGroupPdResolver,
+    entity_type: str,
+    ref_month_start: date,
+) -> set[str]:
+    """external_ids whose classification action is POST (used by the refresh pre-filter)."""
+    return {
+        r.external_id
+        for r, c in classify_all(rows, resolver, entity_type, ref_month_start)
+        if c.action == "POST"
+    }
