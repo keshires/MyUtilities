@@ -79,6 +79,8 @@ class StaleRow:
     pd_last_known_date: date | None
     peer_id: str | None
     is_peer_driven: bool
+    custom_id: str | None = None
+    financials_process_id: str | None = None
 
 
 class PeerGroupPdResolver(ABC):
@@ -152,5 +154,108 @@ def post_ids(
     return {
         r.external_id
         for r, c in classify_all(rows, resolver, entity_type, ref_month_start)
+        if c.action == "POST"
+    }
+
+
+# ---------------------------------------------------------------------------
+# Authoritative PD check via /edfx/v1/entities/pds (spec §8 resolver, now wired).
+# The model computes on-demand with endDate=today; a refresh can only persist a
+# current-period PD if the model can produce one. So: POST iff pds returns a `pd`
+# whose `asOfDate` is in the current period; otherwise the post would be futile.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class PdResult:
+    as_of_date: date | None
+    has_pd: bool
+    message: str | None = None
+
+
+def _parse_iso_date(value: object) -> date | None:
+    if not value or not isinstance(value, str):
+        return None
+    try:
+        return date.fromisoformat(value[:10])
+    except ValueError:
+        return None
+
+
+def parse_pds_entity(obj: dict) -> PdResult:
+    """Parse one entity object from a /edfx/v1/entities/pds response."""
+    return PdResult(
+        as_of_date=_parse_iso_date(obj.get("asOfDate")),
+        has_pd=obj.get("pd") is not None,
+        message=obj.get("message"),
+    )
+
+
+def pds_entity_id(row: StaleRow, entity_type: str) -> str | None:
+    """The entityId to send to /edfx/v1/entities/pds.
+
+    private/public: the external_id. custom: ``<external_id>-<financials_process_id>``
+    (from entity_custom_data). Returns None for custom lacking a financials_process_id.
+    """
+    if entity_type == "custom":
+        if not row.financials_process_id:
+            return None
+        return f"{row.external_id}-{row.financials_process_id}"
+    return row.external_id
+
+
+def classify_by_pds(
+    entity_type: str, result: "PdResult | None", ref_month_start: date
+) -> Classification:
+    """Decide POST vs SKIP from the authoritative pds result."""
+    if result is None:
+        return Classification("pds_unknown", "POST", "no pds result; posting conservatively")
+    if not result.has_pd:
+        return Classification("no_pd", "SKIP", f"model returns no PD ({result.message or 'no pd'})")
+    if is_pd_current(entity_type, result.as_of_date, ref_month_start):
+        return Classification("current_pd", "POST", "model has a current-period PD; refresh will persist it")
+    return Classification("source_stale", "SKIP", "model's latest PD predates the current period")
+
+
+class EntityPdResolver(ABC):
+    """Resolves each entity's authoritative PD (as_of_date + whether a pd exists)."""
+
+    @abstractmethod
+    def resolve(self, rows: list[StaleRow], entity_type: str) -> dict[str, PdResult]:
+        ...
+
+
+class StaticEntityPdResolver(EntityPdResolver):
+    """Offline/test resolver: fixed {external_id: PdResult} mapping."""
+
+    def __init__(self, mapping: dict[str, PdResult]) -> None:
+        self._mapping = mapping
+
+    def resolve(self, rows: list[StaleRow], entity_type: str) -> dict[str, PdResult]:
+        return dict(self._mapping)
+
+
+def classify_all_pds(
+    rows: list[StaleRow],
+    resolver: EntityPdResolver,
+    entity_type: str,
+    ref_month_start: date,
+) -> list[tuple[StaleRow, Classification]]:
+    results = resolver.resolve(rows, entity_type) if rows else {}
+    return [
+        (r, classify_by_pds(entity_type, results.get(r.external_id), ref_month_start))
+        for r in rows
+    ]
+
+
+def post_ids_pds(
+    rows: list[StaleRow],
+    resolver: EntityPdResolver,
+    entity_type: str,
+    ref_month_start: date,
+) -> set[str]:
+    return {
+        r.external_id
+        for r, c in classify_all_pds(rows, resolver, entity_type, ref_month_start)
         if c.action == "POST"
     }
