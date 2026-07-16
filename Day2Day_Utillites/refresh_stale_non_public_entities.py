@@ -531,8 +531,12 @@ async def iter_stale_batches(
     batch_size: int,
     limit: int | None,
     resume_from_batch: int,
+    allowed_ids: set[str] | None = None,
 ) -> AsyncIterator[tuple[int, list[str], bool]]:
-    """Stream entity ids from Postgres in submission-sized batches."""
+    """Stream entity ids from Postgres in submission-sized batches.
+
+    ``allowed_ids`` (set by --pd-precheck) restricts the stream to those external_ids.
+    """
     conn = await pg_connect()
     cutoff = datetime.combine(date_filter, datetime.min.time())
     tenant_param = tenant_id if tenant_id else excluded_tenants
@@ -565,6 +569,8 @@ async def iter_stale_batches(
             async for row in cursor:
                 external_id = row["external_id"]
                 if external_id is None:
+                    continue
+                if allowed_ids is not None and str(external_id) not in allowed_ids:
                     continue
                 seen += 1
                 current.append(str(external_id))
@@ -853,6 +859,7 @@ async def process_batches(
     base_url: str,
     logger: logging.Logger,
     max_retries: int = DEFAULT_MAX_RETRIES,
+    allowed_ids: set[str] | None = None,
 ) -> tuple[int, int, int, list[dict[str, object]]]:
     ok_count = 0
     fail_count = 0
@@ -873,6 +880,7 @@ async def process_batches(
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
+            allowed_ids=allowed_ids,
         ):
             if skipped:
                 skipped_count += 1
@@ -935,6 +943,7 @@ async def process_batches(
             batch_size=batch_size,
             limit=limit,
             resume_from_batch=resume_from_batch,
+            allowed_ids=allowed_ids,
         ):
             if skipped:
                 skipped_count += 1
@@ -1050,10 +1059,13 @@ def execute_refresh(
     base_url: str,
     max_retries: int,
     logger: logging.Logger,
+    allowed_ids: set[str] | None = None,
 ) -> dict[str, object]:
     """Run the refresh for one scope — a single tenant, or all non-excluded
     tenants when ``scope_tenant_id`` is None. Returns a per-scope summary dict
-    whose ``status`` is ``ok`` | ``empty`` | ``error``."""
+    whose ``status`` is ``ok`` | ``empty`` | ``error``.
+
+    ``allowed_ids`` (from --pd-precheck) restricts submissions to those external_ids."""
     scope_started = datetime.now(timezone.utc)
     label = scope_tenant_id or "<all non-excluded>"
     if scope_total > 1:
@@ -1147,6 +1159,7 @@ def execute_refresh(
                 base_url=base_url,
                 logger=logger,
                 max_retries=max_retries,
+                allowed_ids=allowed_ids,
             )
         )
     except Exception as exc:
@@ -1288,6 +1301,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--pd-precheck",
+        action="store_true",
+        help=(
+            "Before posting, classify each stale entity (entity PD + peer-group PD) and "
+            "submit only genuine candidates — skip already-fresh and peer-group-matched. "
+            "Requires --stale-date-column pd_last_known_date."
+        ),
+    )
+    parser.add_argument(
         "--tenant-checkpoint",
         type=str,
         default=None,
@@ -1416,6 +1438,64 @@ def main(argv: list[str] | None = None) -> int:
     checkpoint_path = Path(args.tenant_checkpoint) if args.tenant_checkpoint else None
     tenants_skipped_by_checkpoint = 0
 
+    # PD pre-check: classify the stale set and keep only genuine POST candidates.
+    precheck_ids: set[str] | None = None
+    if args.pd_precheck:
+        if stale_date_column != "pd_last_known_date":
+            raise SystemExit("--pd-precheck requires --stale-date-column pd_last_known_date")
+        import pd_precheck as pc
+
+        async def _fetch_precheck_rows() -> list["pc.StaleRow"]:
+            conn = await pg_connect()
+            try:
+                q = f"""SELECT e.external_id, e.tenant_id, e.pd_last_known_date,
+                               e.entity_data->>'peerId' AS peer_id,
+                               COALESCE(e.entity_data->>'isPeerDriven','') AS ipd
+                        FROM public.entity e
+                        WHERE e.data_type='Private' AND {entity_mode.custom_id_clause}
+                          AND e.external_id IS NOT NULL AND {tenant_clause(tenant_id=tenant_id)}
+                          {financial_stmt_clause(financial_max_age_years)}
+                          {stale_date_clause(stale_date_column)}"""
+                params = [
+                    datetime.combine(date_filter, datetime.min.time()),
+                    tenant_id if tenant_id else excluded,
+                ]
+                rows = await conn.fetch(q, *params)
+            finally:
+                await conn.close()
+            return [
+                pc.StaleRow(str(r["external_id"]), str(r["tenant_id"]),
+                            r["pd_last_known_date"], r["peer_id"], r["ipd"] == "true")
+                for r in rows
+            ]
+
+        def _fetch_group(ids: list[str]) -> list[tuple[str, "date | None"]]:
+            async def run():
+                conn = await pg_connect()
+                try:
+                    return await conn.fetch(
+                        "SELECT entity_data->>'peerId' pid, MAX(pd_last_known_date) mx "
+                        "FROM public.entity WHERE entity_data->>'peerId' = ANY($1::text[]) GROUP BY 1",
+                        ids,
+                    )
+                finally:
+                    await conn.close()
+
+            return [(str(r["pid"]), r["mx"]) for r in asyncio.run(run())]
+
+        _precheck_rows = asyncio.run(_fetch_precheck_rows())
+        precheck_ids = pc.post_ids(
+            _precheck_rows, pc.DbMaxPeerGroupPdResolver(_fetch_group),
+            entity_mode.name, pc.month_start(date.today()),
+        )
+        logger.info(
+            "PD pre-check: %s of %s stale entities will be posted (%s skipped)",
+            len(precheck_ids), len(_precheck_rows), len(_precheck_rows) - len(precheck_ids),
+        )
+        if not precheck_ids:
+            print("\nPD pre-check: nothing to post after filtering.\n")
+            return 0
+
     # Decide the scopes to process.
     if args.per_tenant:
         try:
@@ -1484,6 +1564,7 @@ def main(argv: list[str] | None = None) -> int:
             base_url=base_url,
             max_retries=max_retries,
             logger=logger,
+            allowed_ids=precheck_ids,
         )
         scope_summaries.append(scope_summary)
         # Record a completed tenant so a resumed run skips it. Only when it fully
@@ -1518,6 +1599,8 @@ def main(argv: list[str] | None = None) -> int:
         "date_filter": date_filter.isoformat(),
         "batch_size": batch_size,
         "one_per_request": args.one_per_request,
+        "pd_precheck": args.pd_precheck,
+        "pd_precheck_posted": len(precheck_ids) if precheck_ids is not None else None,
         "workers": workers,
         "max_retries": max_retries,
         "resume_from_batch": args.resume_from_batch,
