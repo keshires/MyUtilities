@@ -259,3 +259,39 @@ def post_ids_pds(
         for r, c in classify_all_pds(rows, resolver, entity_type, ref_month_start)
         if c.action == "POST"
     }
+
+
+class ApiEntityPdResolver(EntityPdResolver):
+    """Resolves PDs via /edfx/v1/entities/pds, batched.
+
+    ``post_batch(entity_ids: list[str]) -> list[dict]`` performs one HTTP POST for a
+    batch of composed entityIds and returns the response ``entities`` array. It is
+    injected so this class is unit-testable offline; the scripts supply a real
+    SSO-authenticated POST. Custom rows without a financials_process_id can't be
+    queried and are omitted (they fall to ``pds_unknown`` -> POST in the classifier).
+    """
+
+    def __init__(
+        self,
+        post_batch: "Callable[[list[str]], list[dict]]",
+        batch_size: int = 200,
+    ) -> None:
+        self._post_batch = post_batch
+        self._batch_size = max(1, batch_size)
+
+    def resolve(self, rows: list[StaleRow], entity_type: str) -> dict[str, PdResult]:
+        id_map: dict[str, str] = {}
+        ordered: list[str] = []
+        for r in rows:
+            eid = pds_entity_id(r, entity_type)
+            if eid is None or eid in id_map:
+                continue
+            id_map[eid] = r.external_id
+            ordered.append(eid)
+        out: dict[str, PdResult] = {}
+        for i in range(0, len(ordered), self._batch_size):
+            batch = ordered[i : i + self._batch_size]
+            for ent in self._post_batch(batch):
+                eid = ent.get("entityId")
+                out[id_map.get(eid, eid)] = parse_pds_entity(ent)
+        return out
