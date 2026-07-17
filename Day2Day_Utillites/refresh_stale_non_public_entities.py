@@ -1310,6 +1310,16 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--allow-ids-file",
+        type=str,
+        default=None,
+        help=(
+            "Restrict posting to the external_ids listed in this file (one per line) — "
+            "e.g. the POST-category ids from a validate_pd_precheck report. Only entities "
+            "in both the stale set and this file are submitted."
+        ),
+    )
+    parser.add_argument(
         "--tenant-checkpoint",
         type=str,
         default=None,
@@ -1440,7 +1450,18 @@ def main(argv: list[str] | None = None) -> int:
 
     # PD pre-check: classify the stale set and keep only genuine POST candidates.
     precheck_ids: set[str] | None = None
-    if args.pd_precheck:
+    if args.allow_ids_file:
+        import pd_precheck as pc
+
+        precheck_ids = pc.load_ids_file(args.allow_ids_file)
+        logger.info(
+            "Allow-ids file %s: restricting posts to %s external_ids",
+            args.allow_ids_file, len(precheck_ids),
+        )
+        if not precheck_ids:
+            print("\nAllow-ids file is empty — nothing to post.\n")
+            return 0
+    elif args.pd_precheck:
         if stale_date_column != "pd_last_known_date":
             raise SystemExit("--pd-precheck requires --stale-date-column pd_last_known_date")
         import pd_precheck as pc
@@ -1602,6 +1623,7 @@ def main(argv: list[str] | None = None) -> int:
         "batch_size": batch_size,
         "one_per_request": args.one_per_request,
         "pd_precheck": args.pd_precheck,
+        "allow_ids_file": args.allow_ids_file,
         "pd_precheck_posted": len(precheck_ids) if precheck_ids is not None else None,
         "workers": workers,
         "max_retries": max_retries,

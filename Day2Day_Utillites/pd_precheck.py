@@ -18,6 +18,17 @@ def month_start(today: date) -> date:
     return today.replace(day=1)
 
 
+def load_ids_file(path: str) -> set[str]:
+    """Load external_ids from a text file (one per line; blanks ignored)."""
+    from pathlib import Path
+
+    return {
+        line.strip()
+        for line in Path(path).read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    }
+
+
 def is_pd_current(entity_type: str, pd_date: date | None, ref_month_start: date) -> bool:
     """True if ``pd_date`` counts as the current period's PD.
 
