@@ -80,6 +80,8 @@ async def _fetch_rows(entity_type: str, ref: date, excluded: list[str], limit: i
                     LEFT JOIN public.entity_custom_data ecd ON ecd.external_id = e.external_id
                     WHERE e.data_type='Private' AND e.custom_id IS NOT NULL AND e.external_id IS NOT NULL
                       AND e.tenant_id <> ALL($2::text[])
+                      AND (NULLIF(e.entity_data->>'financialStmtDate','') IS NULL
+                           OR NULLIF(e.entity_data->>'financialStmtDate','')::timestamp >= (NOW() - INTERVAL '3 years'))
                       AND (e.pd_last_known_date IS NULL OR e.pd_last_known_date < $1::timestamp)
                     ORDER BY e.external_id, e.pd_last_known_date DESC NULLS LAST {lim}"""
             rows = await conn.fetch(q, cutoff, excluded)
@@ -93,6 +95,8 @@ async def _fetch_rows(entity_type: str, ref: date, excluded: list[str], limit: i
                     FROM public.entity
                     WHERE data_type='Private' AND custom_id IS NULL AND external_id IS NOT NULL
                       AND tenant_id <> ALL($2::text[])
+                      AND (NULLIF(entity_data->>'financialStmtDate','') IS NULL
+                           OR NULLIF(entity_data->>'financialStmtDate','')::timestamp >= (NOW() - INTERVAL '3 years'))
                       AND (pd_last_known_date IS NULL OR pd_last_known_date < $1::timestamp)
                     ORDER BY external_id, pd_last_known_date DESC NULLS LAST {lim}"""
             rows = await conn.fetch(q, cutoff, excluded)
