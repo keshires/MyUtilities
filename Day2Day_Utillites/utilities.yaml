@@ -181,6 +181,7 @@ utilities:
         help: "Cap entities (testing/sampling)."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD, MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL]
     outputs:
+      logs_glob: "validate_pd_precheck/pd_precheck_*"
       output_glob: "validate_pd_precheck/*"
       summary_suffix: ".summary.json"
     docs: ["docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md"]
