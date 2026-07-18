@@ -18,6 +18,13 @@ def month_start(today: date) -> date:
     return today.replace(day=1)
 
 
+def financials_completed(status: str | None) -> bool:
+    """True only when the custom financials process status is exactly 'Completed'.
+    Everything else (Completed with errors, Failed, Aborted, Pending, null) counts
+    as NOT completed — surfaced by the validation report."""
+    return (status or "").strip() == "Completed"
+
+
 def load_ids_file(path: str) -> set[str]:
     """Load external_ids from a text file (one per line; blanks ignored)."""
     from pathlib import Path

@@ -75,7 +75,7 @@ async def _fetch_rows(entity_type: str, ref: date, excluded: list[str], limit: i
     try:
         if entity_type == "custom":
             q = f"""SELECT DISTINCT ON (e.external_id) e.external_id, e.tenant_id, e.custom_id,
-                       e.pd_last_known_date, ecd.financials_process_id
+                       e.pd_last_known_date, ecd.financials_process_id, ecd.financials_process_status
                     FROM public.entity e
                     LEFT JOIN public.entity_custom_data ecd ON ecd.external_id = e.external_id
                     WHERE e.data_type='Private' AND e.custom_id IS NOT NULL AND e.external_id IS NOT NULL
@@ -89,7 +89,9 @@ async def _fetch_rows(entity_type: str, ref: date, excluded: list[str], limit: i
                                  None, True, custom_id=str(r["custom_id"]),
                                  financials_process_id=str(r["financials_process_id"]) if r["financials_process_id"] else None)
                      for r in rows]
-            return stale, {}
+            # meta: external_id -> financials_process_status (for the not-completed validation)
+            meta = {str(r["external_id"]): r["financials_process_status"] for r in rows}
+            return stale, meta
         if entity_type == "private":
             q = f"""SELECT DISTINCT ON (external_id) external_id, tenant_id, pd_last_known_date
                     FROM public.entity
@@ -174,11 +176,11 @@ def main(argv: list[str] | None = None) -> int:
     log_path = logs_dir("validate_pd_precheck") / f"pd_precheck_{et}_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.log"
     logger = rf.setup_logging(log_path)
 
-    rows, public_meta = asyncio.run(_fetch_rows(et, ref, excluded, args.limit))
+    rows, meta = asyncio.run(_fetch_rows(et, ref, excluded, args.limit))
     logger.info("Stale %s: %s", et, len(rows))
 
     if et == "public":
-        classified = [(r, pc.classify_public(r.pd_last_known_date, public_meta.get(r.external_id), ref))
+        classified = [(r, pc.classify_public(r.pd_last_known_date, meta.get(r.external_id), ref))
                       for r in rows]
     else:
         pds_post, mapping_lookup = _http(logger)
@@ -187,26 +189,51 @@ def main(argv: list[str] | None = None) -> int:
         classified = [(r, pc.classify_status(et, statuses.get(r.external_id), ref)) for r in rows]
 
     summary = summarize(classified, et)
+
+    # Custom-only validation: surface entities whose financials_process_status <> 'Completed'.
+    if et == "custom":
+        summary["by_financials_status"] = dict(Counter(meta.get(r.external_id) or "(none)"
+                                                        for r, _ in classified))
+        summary["financials_not_completed"] = sum(
+            1 for r, _ in classified if not pc.financials_completed(meta.get(r.external_id)))
+
     ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
     out_csv = output_dir("validate_pd_precheck") / f"pd_precheck_{et}_{ts}.csv"
     orphan_csv = output_dir("validate_pd_precheck") / f"pd_precheck_{et}_{ts}.orphaned.csv"
+    notcomp_csv = output_dir("validate_pd_precheck") / f"pd_precheck_{et}_{ts}.financials_not_completed.csv"
     with out_csv.open("w", newline="", encoding="utf-8") as f, \
             orphan_csv.open("w", newline="", encoding="utf-8") as of:
         w = csv.writer(f); ow = csv.writer(of)
-        w.writerow(["external_id", "tenant_id", "pd_last_known_date", "category", "action", "reason"])
+        w.writerow(["external_id", "tenant_id", "pd_last_known_date", "financials_process_status",
+                    "category", "action", "reason"])
         ow.writerow(["external_id", "tenant_id", "pd_last_known_date", "reason"])
         for r, c in classified:
-            w.writerow([r.external_id, r.tenant_id, r.pd_last_known_date, c.category, c.action, c.reason])
+            fin = meta.get(r.external_id) if et == "custom" else ""
+            w.writerow([r.external_id, r.tenant_id, r.pd_last_known_date, fin, c.category, c.action, c.reason])
             if c.category == "orphaned":
                 ow.writerow([r.external_id, r.tenant_id, r.pd_last_known_date, c.reason])
+
+    if et == "custom":
+        with notcomp_csv.open("w", newline="", encoding="utf-8") as nf:
+            nw = csv.writer(nf)
+            nw.writerow(["external_id", "tenant_id", "financials_process_status", "category", "action"])
+            for r, c in classified:
+                st = meta.get(r.external_id)
+                if not pc.financials_completed(st):
+                    nw.writerow([r.external_id, r.tenant_id, st, c.category, c.action])
+
     summary_path = log_path.with_suffix(".summary.json")
-    summary_path.write_text(json.dumps({"summary": summary, "ref": ref.isoformat(),
-                                        "output_csv": str(out_csv),
-                                        "orphaned_csv": str(orphan_csv)}, indent=2), encoding="utf-8")
+    out = {"summary": summary, "ref": ref.isoformat(), "output_csv": str(out_csv),
+           "orphaned_csv": str(orphan_csv)}
+    if et == "custom":
+        out["financials_not_completed_csv"] = str(notcomp_csv)
+    summary_path.write_text(json.dumps(out, indent=2), encoding="utf-8")
     print(json.dumps(summary, indent=2))
     print(f"\nWrote {summary['stale_found']} rows to {out_csv}")
     if summary["orphaned"]:
         print(f"Orphaned (delete-candidates): {summary['orphaned']} -> {orphan_csv}")
+    if et == "custom":
+        print(f"Financials NOT completed: {summary['financials_not_completed']} -> {notcomp_csv}")
     return 0
 
 
