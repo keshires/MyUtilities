@@ -43,14 +43,34 @@ auto-targets `2026-08-01`; override with `--date-filter YYYY-MM-01`).
 5. **Spot-verify (optional):** `python test_single_entity_refresh.py --entity-type custom --count 10`
    — submits a few individually and polls until `pd_last_known_date` advances.
 
-**PD pre-check report** — `validate_pd_precheck.py --entity-type custom|private|public` (read-only):
-classifies the stale set via the authoritative `/edfx/v1/entities/pds` check (custom uses
-`externalId-financialsProcessId` from entity_custom_data), falling back to `/entity/v1/mapping`;
-entities in **neither are orphaned** → written to a `.orphaned.csv` delete-candidate list. Buckets:
-`refreshable`/`current_pd` (POST) vs `no_pd`/`source_stale`/`mapped_no_pd`/`orphaned` (SKIP); public is
-DB-only/report-only (`public_fresh`/`public_stale`). Needs SSO for private/custom; `--limit` to sample.
-See `docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md`.
-(The refresh's own `--pd-precheck` flag still uses the DB-max peer heuristic to filter posts.)
+## PD eligibility validation report (`validate_pd_precheck.py`) — team command
+
+**Command** (run from `Day2Day_Utillites`, read-only, never posts):
+```powershell
+.\.venv\Scripts\python validate_pd_precheck.py --entity-type custom    # or: private | public
+#   --date-filter YYYY-MM-01   (default: 1st of the current month)
+#   --limit N                  (sample a subset for a quick look)
+```
+
+**Purpose:** before posting anything to `refreshEntities`, determine which stale entities are
+actually *eligible / worth* refreshing — so the team avoids futile queue posts and gets an
+actionable data-quality view (orphans to clean up; custom financials not completed).
+
+**What it does:** finds stale entities (`pd_last_known_date < 1st-of-month`, with `financialStmtDate ≤3y`), then:
+- **private / custom** — authoritative PD check via `/edfx/v1/entities/pds` (custom id =
+  `externalId-financialsProcessId`); if pds has no data → `/entity/v1/mapping`; in **neither ⇒ orphaned**.
+- **public** — DB-only, report-only (`public_fresh` = current-month PD + Active/null status, else `public_stale`).
+
+**Buckets:** `current_pd`/`refreshable` → POST (worth refreshing) · `no_pd`/`source_stale`/`mapped_no_pd` → SKIP (futile) · `orphaned` → SKIP + delete-candidate.
+
+**Outputs** (`output/validate_pd_precheck/` + `.summary.json` in `logs/validate_pd_precheck/`):
+- `pd_precheck_<type>_<ts>.csv` — every stale entity + category/action/reason (+ `financials_process_status` for custom).
+- `…orphaned.csv` — delete-candidates.
+- `…financials_not_completed.csv` (**custom only**) — entities whose `financials_process_status <> Completed`.
+
+**Prereqs:** `.env` needs `TESSERA_POSTGRES_*` (all) + `MOODYS_SSO_*` / `TESSERA_BASE_URL` (private/custom) + `STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB`.
+Design: `docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md`.
+(The refresh's `--pd-precheck` flag uses the older DB-max peer heuristic; this report is the authoritative pds path.)
 
 Outputs: `output/<script>/…` (CSVs, snapshots) and `logs/<script>/…` (run log + `.summary.json`).
 
@@ -58,7 +78,7 @@ Outputs: `output/<script>/…` (CSVs, snapshots) and `logs/<script>/…` (run lo
 - **Custom:** PD lands on the **1st** of the month (fresh = pd_last_known_date == 1st).
 - **Private:** PD lands **any day** in the current month (vendor-dependent).
 - Both share the stale cutoff `pd_last_known_date < 1st-of-month`; only `--entity-type` differs.
-- **Public** entities are vendor-driven — not refreshable here (report-only, planned).
+- **Public** entities are vendor-driven (refreshed by the separate daily `edfx-portfolio-refresh-batch`) — not refreshable here; report-only via the validation report.
 
 ## Safety
 - `refresh_*` and `test_single_*` **write to prod** via Tessera. Dry-run, small `--limit`/`--count`, verify, then scale.

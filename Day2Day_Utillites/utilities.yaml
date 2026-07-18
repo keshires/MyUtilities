@@ -167,7 +167,7 @@ utilities:
     name: PD Pre-Check Report
     script: validate_pd_precheck.py
     category: stale-entity-refresh
-    purpose: "Classify stale entities (by pd_last_known_date) into refreshable/orphaned/no-pd buckets using the authoritative /edfx/v1/entities/pds check (private=externalId, custom=externalId-financialsProcessId), with /entity/v1/mapping fallback (empty => orphaned/delete-candidate). Public is DB-only (fresh = current-month PD + Active/null status). Read-only; never posts."
+    purpose: "PD refresh-eligibility validation. Classify stale entities (by pd_last_known_date, financialStmtDate<=3y) into refreshable/orphaned/no-pd buckets using the authoritative /edfx/v1/entities/pds check (private=externalId, custom=externalId-financialsProcessId), with /entity/v1/mapping fallback (empty => orphaned/delete-candidate). Custom also flags financials_process_status<>Completed (financials_not_completed.csv). Public is DB-only (fresh = current-month PD + Active/null status). Read-only; never posts."
     invocation: cli
     args:
       - flag: --entity-type
