@@ -17,8 +17,14 @@ Tools live in `Day2Day_Utillites/`. Run everything from that folder with its ven
   look caught up when it isn't. `pd_last_known_date` is the true signal.
 - **Exclude the deprecated giant** by setting `STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB`
   in `.env`. This also *includes* `0014000000NXtS8` (the script's built-in default excludes it).
-- **One entity per request + iterate.** `refreshEntities` returns 200 but drops ~13–17% per pass.
-  Re-validate and re-refresh the residual until the count plateaus.
+- **One entity per request + iterate (temporary).** `--one-per-request` is a **workaround** for a
+  batch bug fixed in [edfx-tessera-service PR #2541](https://github.com/moodysanalytics/edfx-tessera-service/pull/2541),
+  **not yet in prod**. Once it ships, switch back: drop `--one-per-request`, use `--batch-size` ~10
+  (private) / ~100 (custom). `refreshEntities` also **enqueues asynchronously** — a 200 means
+  "Submitted", NOT that the PD moved; the SQS consumer recomputes downstream. **Re-validate only
+  after the refresh queue drains**, not just when Postgres looks settled (low mid-processing yield is
+  expected, not failure). Iterate on the residual until it plateaus. (Verified from source — see
+  memory `edfx-refresh-mechanics`.)
 
 ## Monthly run (custom + private, by PD date)
 

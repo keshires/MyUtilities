@@ -13,9 +13,25 @@ current month**, so running them in August automatically targets `2026-08-01`.
 - **Exclude the deprecated giant `001aJ00000Cwqc2QAB`** (unsupported, cleanup pending). Setting
   `STALE_REFRESH_EXCLUDED_TENANTS` to it also means tenant `0014000000NXtS8` is *included*
   (the script's built-in default would otherwise exclude NXtS8).
-- **One entity per request + iterate.** The Tessera `refreshEntities` path is lossy: every submit
-  returns HTTP 200 but ~13–17% are not processed per pass. Re-run on the residual until the count
-  plateaus.
+- **One entity per request (temporary) + iterate.** `--one-per-request` is a **workaround** for a
+  batch-payload bug fixed in [edfx-tessera-service PR #2541](https://github.com/moodysanalytics/edfx-tessera-service/pull/2541)
+  but **not yet in prod**. **Once #2541 is in prod, switch back to batching:** drop `--one-per-request`
+  and set `--batch-size` to the service's own chunk size (**~10 private / ~100 custom**, or a safe
+  ~50). Batching is ~10–100× fewer HTTP calls.
+
+## How `refreshEntities` actually works (verified from edfx-tessera-service source)
+
+- **It enqueues, it does not refresh synchronously.** `POST /tesseraui/v1/refreshEntities` returns
+  `"Submitted"` (HTTP 200) after putting an SQS message on the refresh queue. The real recompute +
+  persist happens **downstream in the SQS consumer** (`EntityRefreshService`). So **a 200 ≠ the PD
+  moved.**
+- **Therefore re-validate only after the refresh queue drains** — not merely when Postgres "looks
+  settled." Low yield seen minutes/hours after posting is usually the async consumer still working
+  (or entities that genuinely can't advance), not failed posts.
+- The service internally chunks at **5 public / 10 private / 100 custom-financials** per message —
+  which is why moderate `--batch-size` (not 1, not 15k) is the right shape once #2541 lands.
+- `force: true` (which the script sends) bypasses the service's staleness threshold and refreshes
+  the named entities regardless of recency.
 
 ## PD-date rule per entity type
 

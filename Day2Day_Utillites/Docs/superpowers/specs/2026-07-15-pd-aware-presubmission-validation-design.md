@@ -178,3 +178,21 @@ Mapping "found" is detected by the id appearing in the batched response body.
 
 Building blocks retained: `DbMaxPeerGroupPdResolver` (offline/tests) and the peer-group
 classifier remain in `pd_precheck.py` as reusable, tested code.
+
+### Refresh mechanics — verified against edfx-tessera-service source (2026-07-18)
+
+- `POST /tesseraui/v1/refreshEntities` is **enqueue-only**: it returns `"Submitted"` (200) after
+  putting an SQS message on the refresh queue; the recompute + persist happen **downstream in the
+  SQS consumer** (`EntityRefreshService`). **A 200 does not mean the PD advanced.** Consequence for
+  this design: re-validation must run **after the refresh queue drains**, not just when Postgres
+  looks settled; mid-processing low yield is expected.
+- `refreshEntities` is a **batch** endpoint (internally chunks 5 public / 10 private / 100
+  custom-financials). The current `--one-per-request` is a **temporary workaround** for a batch bug
+  fixed in edfx-tessera-service PR #2541 (not yet in prod). Post-fix: switch to `--batch-size` at
+  the service's chunk sizes.
+- Eligibility rules `pd_last_known_date` staleness and `financialStmtDate ≤3y` are **intentional
+  homegrown validations** (the latter matches unmerged branch EDFX-27547); the service's own
+  scheduler uses `as_of_date`/`updated_date` hour-thresholds instead. Public entities are refreshed
+  by a **separate daily batch** (`edfx-portfolio-refresh-batch`, direct CreditEdge SQL → Postgres),
+  never via `refreshEntities` — so public stays report-only here. Full mechanics in memory
+  `edfx-refresh-mechanics`.
