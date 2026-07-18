@@ -6,13 +6,13 @@
 
 **Architecture:** Extend the existing read-only runner [`portfolio_kpi_metrics_postgres.py`](../../../Day2Day_Utillites/portfolio_kpi_metrics_postgres.py) and its SQL file [`portfolio-kpi-metrics.sql`](../../../Day2Day_Utillites/Docs/portfolio-kpi-metrics.sql). A new `-- SETUP: build_temp` SQL block materializes two session TEMP tables (`tmp_kpi_window`, `tmp_kpi_entity`) once per run — extracting `entity_refresh_message->>'source'` into a plain column and pre-`unnest`ing the entity array — then every report reads from the temp tables. Pivots are built in Python. Env selection loads `.env.<env>` ahead of base `.env`.
 
-**Tech Stack:** Python 3 (stdlib `argparse`, `csv`, `re`, `unittest`), `asyncpg`, `python-dotenv`, PostgreSQL (range-partitioned table).
+**Tech Stack:** Python 3 (stdlib `argparse`, `csv`, `re`), `asyncpg`, `python-dotenv`, `pytest` (tests), PostgreSQL (range-partitioned table).
 
 ## Global Constraints
 
 - Tool is **read-only** against the DB. No `INSERT`/`UPDATE`/`DELETE`/DDL on base tables. TEMP tables only.
 - Run everything from the `Day2Day_Utillites/` folder using its venv: `.\.venv\Scripts\python` (Windows) — the plan's commands assume cwd = `Day2Day_Utillites`.
-- No new runtime dependency: tests use stdlib `unittest` (pytest is not installed).
+- Tests use **pytest** (installed, v9.1.1 — the established convention: plain `assert` functions importing top-level modules, e.g. `import portfolio_kpi_metrics_postgres as mod`). Run from `Day2Day_Utillites` as `.\.venv\Scripts\python -m pytest tests/<file>.py -v` (the `-m pytest` form puts the project dir on `sys.path` so top-level modules import). **Do NOT create `tests/__init__.py`** — the existing suite relies on rootdir import mode; a package marker would break it.
 - Preserve existing `-- REPORT:` marker names already in the SQL file (DBeaver users reference them). New reports add new markers.
 - Window filter must stay `message_created_at >= start AND message_created_at < end` (partition pruning). `--start` inclusive, `--end` exclusive.
 - `--source`, when set, scopes the whole run (applied when building `tmp_kpi_window`).
@@ -56,81 +56,72 @@ Pivot specs (`marker → (index_cols, pivot_col, value_col)`):
 
 **Files:**
 - Modify: `Day2Day_Utillites/portfolio_kpi_metrics_postgres.py`
-- Create: `Day2Day_Utillites/tests/__init__.py`
 - Test: `Day2Day_Utillites/tests/test_env_loading.py`
 
 **Interfaces:**
 - Produces: `load_env(env: str | None, root: Path = PROJECT_ROOT) -> list[Path]` — loads `.env.<env>` then base `.env` with `override=False` (so OS env wins, then env-file, then base). Returns the list of files actually loaded. Missing `.env.<env>` prints a warning to stderr and is skipped.
 
-- [ ] **Step 1: Create the tests package marker**
+Do NOT create `tests/__init__.py` — pytest collects `tests/` by rootdir import mode; a package marker would break the existing suite.
 
-Create `Day2Day_Utillites/tests/__init__.py` (empty file):
+- [ ] **Step 1: Write the failing test**
 
-```python
-```
-
-- [ ] **Step 2: Write the failing test**
-
-Create `Day2Day_Utillites/tests/test_env_loading.py`:
+Create `Day2Day_Utillites/tests/test_env_loading.py` (pytest style, matching the existing suite):
 
 ```python
 import os
-import unittest
 from pathlib import Path
-from tempfile import TemporaryDirectory
+
+import pytest
 
 import portfolio_kpi_metrics_postgres as mod
 
+_KEYS = ("KPI_T_OSWIN", "KPI_T_ENVFILE", "KPI_T_BASE")
 
-class LoadEnvTests(unittest.TestCase):
-    def setUp(self):
-        # Clean the vars these tests touch so prior state never leaks in.
-        for k in ("KPI_T_OSWIN", "KPI_T_ENVFILE", "KPI_T_BASE"):
+
+@pytest.fixture(autouse=True)
+def _clean_env():
+    """Snapshot/restore the vars these tests touch (load_dotenv mutates os.environ)."""
+    saved = {k: os.environ.get(k) for k in _KEYS}
+    for k in _KEYS:
+        os.environ.pop(k, None)
+    yield
+    for k, v in saved.items():
+        if v is None:
             os.environ.pop(k, None)
-        self.addCleanup(
-            lambda: [os.environ.pop(k, None)
-                     for k in ("KPI_T_OSWIN", "KPI_T_ENVFILE", "KPI_T_BASE")]
-        )
-
-    def test_precedence_os_then_envfile_then_base(self):
-        with TemporaryDirectory() as d:
-            root = Path(d)
-            (root / ".env.qa").write_text(
-                "KPI_T_OSWIN=fromfile\nKPI_T_ENVFILE=fromqa\n", encoding="utf-8"
-            )
-            (root / ".env").write_text(
-                "KPI_T_ENVFILE=frombase\nKPI_T_BASE=frombase\n", encoding="utf-8"
-            )
-            os.environ["KPI_T_OSWIN"] = "fromos"
-
-            loaded = mod.load_env("qa", root=root)
-
-            self.assertEqual(os.environ["KPI_T_OSWIN"], "fromos")      # OS wins
-            self.assertEqual(os.environ["KPI_T_ENVFILE"], "fromqa")    # env-file beats base
-            self.assertEqual(os.environ["KPI_T_BASE"], "frombase")     # base fills gap
-            self.assertEqual(
-                [p.name for p in loaded], [".env.qa", ".env"]
-            )
-
-    def test_missing_env_file_is_not_fatal(self):
-        with TemporaryDirectory() as d:
-            root = Path(d)
-            (root / ".env").write_text("KPI_T_BASE=frombase\n", encoding="utf-8")
-            loaded = mod.load_env("nope", root=root)  # .env.nope does not exist
-            self.assertEqual([p.name for p in loaded], [".env"])
-            self.assertEqual(os.environ["KPI_T_BASE"], "frombase")
+        else:
+            os.environ[k] = v
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_precedence_os_then_envfile_then_base(tmp_path):
+    (tmp_path / ".env.qa").write_text(
+        "KPI_T_OSWIN=fromfile\nKPI_T_ENVFILE=fromqa\n", encoding="utf-8"
+    )
+    (tmp_path / ".env").write_text(
+        "KPI_T_ENVFILE=frombase\nKPI_T_BASE=frombase\n", encoding="utf-8"
+    )
+    os.environ["KPI_T_OSWIN"] = "fromos"
+
+    loaded = mod.load_env("qa", root=tmp_path)
+
+    assert os.environ["KPI_T_OSWIN"] == "fromos"      # OS wins
+    assert os.environ["KPI_T_ENVFILE"] == "fromqa"    # env-file beats base
+    assert os.environ["KPI_T_BASE"] == "frombase"     # base fills gap
+    assert [p.name for p in loaded] == [".env.qa", ".env"]
+
+
+def test_missing_env_file_is_not_fatal(tmp_path):
+    (tmp_path / ".env").write_text("KPI_T_BASE=frombase\n", encoding="utf-8")
+    loaded = mod.load_env("nope", root=tmp_path)  # .env.nope does not exist
+    assert [p.name for p in loaded] == [".env"]
+    assert os.environ["KPI_T_BASE"] == "frombase"
 ```
 
-- [ ] **Step 3: Run test to verify it fails**
+- [ ] **Step 2: Run test to verify it fails**
 
-Run: `.\.venv\Scripts\python -m unittest discover -s tests -t . -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_env_loading.py -v`
 Expected: FAIL — `AttributeError: module 'portfolio_kpi_metrics_postgres' has no attribute 'load_env'`.
 
-- [ ] **Step 4: Implement `load_env` and drop the old loader import**
+- [ ] **Step 3: Implement `load_env` and drop the old loader import**
 
 In `Day2Day_Utillites/portfolio_kpi_metrics_postgres.py`, change the import line:
 
@@ -173,15 +164,15 @@ def load_env(env: str | None, root: Path = PROJECT_ROOT) -> list[Path]:
     return loaded
 ```
 
-- [ ] **Step 5: Run test to verify it passes**
+- [ ] **Step 4: Run test to verify it passes**
 
-Run: `.\.venv\Scripts\python -m unittest discover -s tests -t . -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_env_loading.py -v`
 Expected: PASS (2 tests in `test_env_loading`).
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
-git add Day2Day_Utillites/portfolio_kpi_metrics_postgres.py Day2Day_Utillites/tests/__init__.py Day2Day_Utillites/tests/test_env_loading.py
+git add Day2Day_Utillites/portfolio_kpi_metrics_postgres.py Day2Day_Utillites/tests/test_env_loading.py
 git commit -m "feat(kpi-metrics): add --env-aware .env loader (load_env)"
 ```
 
@@ -201,10 +192,7 @@ git commit -m "feat(kpi-metrics): add --env-aware .env loader (load_env)"
 Create `Day2Day_Utillites/tests/test_pivot_rows.py`:
 
 ```python
-import unittest
-
 from portfolio_kpi_metrics_postgres import pivot_rows
-
 
 LONG = [
     {"entity_id": "E1", "source": "Custom Financials", "refresh_count": 3},
@@ -213,49 +201,44 @@ LONG = [
 ]
 
 
-class PivotRowsTests(unittest.TestCase):
-    def test_wide_shape_zero_fill_and_total(self):
-        wide = pivot_rows(LONG, ["entity_id"], "source", "refresh_count")
-        # E2 has the higher total (10) so it sorts first.
-        self.assertEqual(wide[0]["entity_id"], "E2")
-        self.assertEqual(wide[0]["Custom Financials"], 10)
-        self.assertEqual(wide[0]["EDF-X"], 0)      # zero-filled
-        self.assertEqual(wide[0]["total"], 10)
-        self.assertEqual(wide[1]["entity_id"], "E1")
-        self.assertEqual(wide[1]["total"], 5)
-        # Column order: index col, then sorted sources, then total.
-        self.assertEqual(
-            list(wide[0].keys()),
-            ["entity_id", "Custom Financials", "EDF-X", "total"],
-        )
-
-    def test_top_truncates(self):
-        wide = pivot_rows(LONG, ["entity_id"], "source", "refresh_count", top=1)
-        self.assertEqual(len(wide), 1)
-        self.assertEqual(wide[0]["entity_id"], "E2")
-
-    def test_multi_index(self):
-        rows = [
-            {"portfolio_id": 1, "entity_id": "E1", "source": "A", "refresh_count": 1},
-            {"portfolio_id": 1, "entity_id": "E1", "source": "B", "refresh_count": 4},
-            {"portfolio_id": 2, "entity_id": "E9", "source": "A", "refresh_count": 2},
-        ]
-        wide = pivot_rows(rows, ["portfolio_id", "entity_id"], "source", "refresh_count")
-        self.assertEqual(list(wide[0].keys()), ["portfolio_id", "entity_id", "A", "B", "total"])
-        self.assertEqual(wide[0]["portfolio_id"], 1)
-        self.assertEqual(wide[0]["total"], 5)
-
-    def test_empty(self):
-        self.assertEqual(pivot_rows([], ["entity_id"], "source", "refresh_count"), [])
+def test_wide_shape_zero_fill_and_total():
+    wide = pivot_rows(LONG, ["entity_id"], "source", "refresh_count")
+    # E2 has the higher total (10) so it sorts first.
+    assert wide[0]["entity_id"] == "E2"
+    assert wide[0]["Custom Financials"] == 10
+    assert wide[0]["EDF-X"] == 0      # zero-filled
+    assert wide[0]["total"] == 10
+    assert wide[1]["entity_id"] == "E1"
+    assert wide[1]["total"] == 5
+    # Column order: index col, then sorted sources, then total.
+    assert list(wide[0].keys()) == ["entity_id", "Custom Financials", "EDF-X", "total"]
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_top_truncates():
+    wide = pivot_rows(LONG, ["entity_id"], "source", "refresh_count", top=1)
+    assert len(wide) == 1
+    assert wide[0]["entity_id"] == "E2"
+
+
+def test_multi_index():
+    rows = [
+        {"portfolio_id": 1, "entity_id": "E1", "source": "A", "refresh_count": 1},
+        {"portfolio_id": 1, "entity_id": "E1", "source": "B", "refresh_count": 4},
+        {"portfolio_id": 2, "entity_id": "E9", "source": "A", "refresh_count": 2},
+    ]
+    wide = pivot_rows(rows, ["portfolio_id", "entity_id"], "source", "refresh_count")
+    assert list(wide[0].keys()) == ["portfolio_id", "entity_id", "A", "B", "total"]
+    assert wide[0]["portfolio_id"] == 1
+    assert wide[0]["total"] == 5
+
+
+def test_empty():
+    assert pivot_rows([], ["entity_id"], "source", "refresh_count") == []
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_pivot_rows -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_pivot_rows.py -v`
 Expected: FAIL — `ImportError: cannot import name 'pivot_rows'`.
 
 - [ ] **Step 3: Implement `pivot_rows`**
@@ -307,7 +290,7 @@ def pivot_rows(
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_pivot_rows -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_pivot_rows.py -v`
 Expected: PASS (4 tests).
 
 - [ ] **Step 5: Commit**
@@ -333,52 +316,50 @@ git commit -m "feat(kpi-metrics): add pivot_rows helper for 2D report output"
 Create `Day2Day_Utillites/tests/test_report_registry.py`:
 
 ```python
-import unittest
+import pytest
 
 import portfolio_kpi_metrics_postgres as mod
 
 
-class RegistryTests(unittest.TestCase):
-    def test_all_expands_to_marker_set(self):
-        keys = mod.resolve_reports("all")
-        self.assertIn("entities_by_day_source_status", keys)
-        self.assertIn("portfolios_by_day_source_status", keys)
-        self.assertNotIn("slow_global", keys)           # slow excluded from all
-        self.assertNotIn("entity_by_source", keys)      # pivots excluded from all
-
-    def test_alias_maps_to_marker(self):
-        self.assertEqual(mod.resolve_reports("daily"), ["daily_totals_source"])
-        self.assertEqual(mod.resolve_reports("status"), ["status_summary"])
-        self.assertEqual(mod.resolve_reports("entities_by_day"),
-                         ["triggering_entity_counts_by_day"])
-
-    def test_new_reports_resolve(self):
-        for alias in (
-            "entities_by_day_source_status",
-            "portfolios_by_day_source_status",
-            "entity_by_source",
-            "portfolio_entity_source",
-        ):
-            self.assertEqual(mod.resolve_reports(alias), [alias])
-
-    def test_pivot_specs_shape(self):
-        self.assertEqual(mod.PIVOT_SPECS["entity_by_source"],
-                         (["entity_id"], "source", "refresh_count"))
-        self.assertEqual(mod.PIVOT_SPECS["portfolio_entity_source"],
-                         (["portfolio_id", "entity_id"], "source", "refresh_count"))
-
-    def test_unknown_report_raises(self):
-        with self.assertRaises(SystemExit):
-            mod.resolve_reports("does_not_exist")
+def test_all_expands_to_marker_set():
+    keys = mod.resolve_reports("all")
+    assert "entities_by_day_source_status" in keys
+    assert "portfolios_by_day_source_status" in keys
+    assert "slow_global" not in keys        # slow excluded from all
+    assert "entity_by_source" not in keys   # pivots excluded from all
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_alias_maps_to_marker():
+    assert mod.resolve_reports("daily") == ["daily_totals_source"]
+    assert mod.resolve_reports("status") == ["status_summary"]
+    assert mod.resolve_reports("entities_by_day") == ["triggering_entity_counts_by_day"]
+
+
+def test_new_reports_resolve():
+    for alias in (
+        "entities_by_day_source_status",
+        "portfolios_by_day_source_status",
+        "entity_by_source",
+        "portfolio_entity_source",
+    ):
+        assert mod.resolve_reports(alias) == [alias]
+
+
+def test_pivot_specs_shape():
+    assert mod.PIVOT_SPECS["entity_by_source"] == (["entity_id"], "source", "refresh_count")
+    assert mod.PIVOT_SPECS["portfolio_entity_source"] == (
+        ["portfolio_id", "entity_id"], "source", "refresh_count"
+    )
+
+
+def test_unknown_report_raises():
+    with pytest.raises(SystemExit):
+        mod.resolve_reports("does_not_exist")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_report_registry -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_report_registry.py -v`
 Expected: FAIL — assertions about new aliases / `PIVOT_SPECS` not defined.
 
 - [ ] **Step 3: Replace the registry constants and `resolve_reports`**
@@ -442,7 +423,7 @@ def resolve_reports(report_arg: str) -> list[str]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_report_registry -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_report_registry.py -v`
 Expected: PASS (5 tests).
 
 - [ ] **Step 5: Commit**
@@ -469,10 +450,9 @@ git commit -m "feat(kpi-metrics): expand report registry + pivot specs"
 Create `Day2Day_Utillites/tests/test_sql_sections.py`:
 
 ```python
-import unittest
+import pytest
 
 from portfolio_kpi_metrics_postgres import load_sql_sections
-
 
 SAMPLE = """\
 -- header comment
@@ -490,28 +470,25 @@ SELECT day, source, COUNT(*) FROM tmp_kpi_window GROUP BY day, source;
 """
 
 
-class LoadSqlSectionsTests(unittest.TestCase):
-    def test_splits_setup_and_reports(self):
-        setup, reports = load_sql_sections(SAMPLE)
-        self.assertIn("CREATE TEMP TABLE tmp_kpi_window", setup)
-        self.assertEqual(set(reports), {"status_summary", "daily_totals_source"})
-
-    def test_report_body_terminated_with_semicolon(self):
-        _, reports = load_sql_sections(SAMPLE)
-        self.assertTrue(reports["status_summary"].rstrip().endswith(";"))
-
-    def test_no_reports_raises(self):
-        with self.assertRaises(SystemExit):
-            load_sql_sections("-- SETUP: build_temp\nSELECT 1;\n")
+def test_splits_setup_and_reports():
+    setup, reports = load_sql_sections(SAMPLE)
+    assert "CREATE TEMP TABLE tmp_kpi_window" in setup
+    assert set(reports) == {"status_summary", "daily_totals_source"}
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_report_body_terminated_with_semicolon():
+    _, reports = load_sql_sections(SAMPLE)
+    assert reports["status_summary"].rstrip().endswith(";")
+
+
+def test_no_reports_raises():
+    with pytest.raises(SystemExit):
+        load_sql_sections("-- SETUP: build_temp\nSELECT 1;\n")
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_sql_sections -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_sql_sections.py -v`
 Expected: FAIL — `ImportError: cannot import name 'load_sql_sections'`.
 
 - [ ] **Step 3: Replace `REPORT_HEADER` + `load_sql_reports` with a section parser**
@@ -566,7 +543,7 @@ def load_sql_file_sections(path: Path) -> tuple[str, dict[str, str]]:
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_sql_sections -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_sql_sections.py -v`
 Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
@@ -593,48 +570,51 @@ git commit -m "feat(kpi-metrics): parse SETUP + REPORT sections from SQL file"
 Create `Day2Day_Utillites/tests/test_sql_file.py`:
 
 ```python
-import unittest
+import pytest
 
 import portfolio_kpi_metrics_postgres as mod
 
 
-class SqlFileTests(unittest.TestCase):
-    def setUp(self):
-        self.setup_sql, self.reports = mod.load_sql_file_sections(mod.SQL_FILE)
-
-    def test_setup_builds_both_temp_tables(self):
-        self.assertIn("CREATE TEMP TABLE tmp_kpi_window", self.setup_sql)
-        self.assertIn("CREATE TEMP TABLE tmp_kpi_entity", self.setup_sql)
-        self.assertIn("DROP TABLE IF EXISTS", self.setup_sql)
-
-    def test_every_alias_target_marker_exists(self):
-        needed = set(mod.REPORT_ALIASES.values())
-        missing = needed - set(self.reports)
-        self.assertEqual(missing, set(), f"SQL file missing markers: {missing}")
-
-    def test_all_report_keys_present(self):
-        missing = set(mod.ALL_REPORT_KEYS) - set(self.reports)
-        self.assertEqual(missing, set())
-
-    def test_pivot_markers_return_expected_value_column(self):
-        for marker in mod.PIVOT_SPECS:
-            self.assertIn(marker, self.reports)
-            self.assertIn("refresh_count", self.reports[marker])
-
-    def test_reports_read_temp_tables_not_base_table(self):
-        # Report bodies must not scan the base table directly.
-        for name, body in self.reports.items():
-            self.assertNotIn("portfolio_kpi_update_log", body,
-                             f"{name} still references the base table")
+@pytest.fixture
+def sections():
+    return mod.load_sql_file_sections(mod.SQL_FILE)
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_setup_builds_both_temp_tables(sections):
+    setup_sql, _ = sections
+    assert "CREATE TEMP TABLE tmp_kpi_window" in setup_sql
+    assert "CREATE TEMP TABLE tmp_kpi_entity" in setup_sql
+    assert "DROP TABLE IF EXISTS" in setup_sql
+
+
+def test_every_alias_target_marker_exists(sections):
+    _, reports = sections
+    missing = set(mod.REPORT_ALIASES.values()) - set(reports)
+    assert missing == set(), f"SQL file missing markers: {missing}"
+
+
+def test_all_report_keys_present(sections):
+    _, reports = sections
+    assert set(mod.ALL_REPORT_KEYS) - set(reports) == set()
+
+
+def test_pivot_markers_return_expected_value_column(sections):
+    _, reports = sections
+    for marker in mod.PIVOT_SPECS:
+        assert marker in reports
+        assert "refresh_count" in reports[marker]
+
+
+def test_reports_read_temp_tables_not_base_table(sections):
+    # Report bodies must not scan the base table directly.
+    _, reports = sections
+    for name, body in reports.items():
+        assert "portfolio_kpi_update_log" not in body, f"{name} still references the base table"
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_sql_file -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_sql_file.py -v`
 Expected: FAIL — current file has no SETUP block / new markers / still references base table.
 
 - [ ] **Step 3: Rewrite the SQL file**
@@ -1025,7 +1005,7 @@ ORDER BY c.process_seconds_computed DESC;
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_sql_file -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_sql_file.py -v`
 Expected: PASS (5 tests). If `test_every_alias_target_marker_exists` fails, the failure message names the missing marker — add it to the SQL file.
 
 - [ ] **Step 5: Commit**
@@ -1052,40 +1032,35 @@ git commit -m "perf(kpi-metrics): temp-table SETUP + reports read tmp tables; ad
 Create `Day2Day_Utillites/tests/test_report_routing.py`:
 
 ```python
-import unittest
+import argparse
 
 import portfolio_kpi_metrics_postgres as mod
 
 
-class RoutingTests(unittest.TestCase):
-    def test_is_pivot(self):
-        self.assertTrue(mod.is_pivot("entity_by_source"))
-        self.assertTrue(mod.is_pivot("portfolio_entity_source"))
-        self.assertFalse(mod.is_pivot("status_summary"))
-
-    def test_parser_accepts_env_and_top(self):
-        # main() builds a parser; ensure --env and --top are wired without running a query.
-        import argparse
-        p = mod.build_arg_parser()
-        self.assertIsInstance(p, argparse.ArgumentParser)
-        ns = p.parse_args([
-            "--start", "2026-05-20 00:00:00",
-            "--end", "2026-05-21 00:00:00",
-            "--report", "entity_by_source",
-            "--env", "qa",
-            "--top", "25",
-        ])
-        self.assertEqual(ns.env, "qa")
-        self.assertEqual(ns.top, 25)
+def test_is_pivot():
+    assert mod.is_pivot("entity_by_source")
+    assert mod.is_pivot("portfolio_entity_source")
+    assert not mod.is_pivot("status_summary")
 
 
-if __name__ == "__main__":
-    unittest.main()
+def test_parser_accepts_env_and_top():
+    # ensure --env and --top are wired without running a query.
+    p = mod.build_arg_parser()
+    assert isinstance(p, argparse.ArgumentParser)
+    ns = p.parse_args([
+        "--start", "2026-05-20 00:00:00",
+        "--end", "2026-05-21 00:00:00",
+        "--report", "entity_by_source",
+        "--env", "qa",
+        "--top", "25",
+    ])
+    assert ns.env == "qa"
+    assert ns.top == 25
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `.\.venv\Scripts\python -m unittest tests.test_report_routing -v`
+Run: `.\.venv\Scripts\python -m pytest tests/test_report_routing.py -v`
 Expected: FAIL — `is_pivot` / `build_arg_parser` not defined.
 
 - [ ] **Step 3: Add `is_pivot`, refactor the parser into `build_arg_parser`, wire SETUP + pivots + `--env`/`--top`**
@@ -1221,10 +1196,10 @@ def main() -> None:
 
 Ensure `import os` is in the import block at the top of the file (add it if missing).
 
-- [ ] **Step 4: Run the routing test + full suite + `--help` smoke**
+- [ ] **Step 4: Run the routing test + this plan's suite + `--help` smoke**
 
-Run: `.\.venv\Scripts\python -m unittest discover -s tests -t . -v`
-Expected: PASS (all tests across the 6 test modules).
+Run: `.\.venv\Scripts\python -m pytest tests/test_env_loading.py tests/test_pivot_rows.py tests/test_report_registry.py tests/test_sql_sections.py tests/test_sql_file.py tests/test_report_routing.py -v`
+Expected: PASS (all tests across this plan's 6 test modules).
 
 Run: `.\.venv\Scripts\python portfolio_kpi_metrics_postgres.py --help`
 Expected: exit 0; help shows `--env`, `--top`, and the expanded `--report` choices.
@@ -1481,7 +1456,7 @@ git commit -m "docs(kpi-metrics): document new reports, --env/--top, temp-table 
 
 ## Final verification
 
-- [ ] Run the full suite once more: `.\.venv\Scripts\python -m unittest discover -s tests -t . -v` — all green.
+- [ ] Run this plan's suite once more: `.\.venv\Scripts\python -m pytest tests/test_env_loading.py tests/test_pivot_rows.py tests/test_report_registry.py tests/test_sql_sections.py tests/test_sql_file.py tests/test_report_routing.py -v` — all green. (Optionally `python -m pytest tests/ -v` to confirm no regressions in the existing suite.)
 - [ ] `.\.venv\Scripts\python portfolio_kpi_metrics_postgres.py --help` exits 0 and lists new flags/reports.
 - [ ] `git status` clean; no `.env`, `.env.ci/.qa/.stg` (non-example) tracked.
 - [ ] Deferred (operator, with non-prod creds): Task 6 Step 6 manual DB smoke + parity check.
