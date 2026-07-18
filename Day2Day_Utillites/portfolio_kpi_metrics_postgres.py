@@ -32,7 +32,36 @@ try:
 except ImportError as exc:  # pragma: no cover
     raise SystemExit("asyncpg is required. Install with: pip install asyncpg") from exc
 
-from run_portfolio_kpis_postgres import PostgresSettings, _load_dotenv_from_project_root
+from run_portfolio_kpis_postgres import PostgresSettings
+
+
+def load_env(env: str | None, root: Path = PROJECT_ROOT) -> list[Path]:
+    """Load .env.<env> then base .env (override=False → OS env > env-file > base).
+
+    Missing .env.<env> is a warning, not an error. Returns the files loaded.
+    """
+    try:
+        from dotenv import load_dotenv
+    except ImportError:
+        return []
+    loaded: list[Path] = []
+    if env:
+        env_path = root / f".env.{env}"
+        if env_path.is_file():
+            load_dotenv(env_path, override=False)
+            loaded.append(env_path)
+        else:
+            print(
+                f"warning: --env {env} given but {env_path} not found; "
+                "falling back to base .env / OS environment.",
+                file=sys.stderr,
+            )
+    base_path = root / ".env"
+    if base_path.is_file():
+        load_dotenv(base_path, override=False)
+        loaded.append(base_path)
+    return loaded
+
 
 SQL_FILE = PROJECT_ROOT / "Docs" / "portfolio-kpi-metrics.sql"
 REPORT_HEADER = re.compile(r"^--\s*REPORT:\s*(\w+)\s*$", re.MULTILINE)
