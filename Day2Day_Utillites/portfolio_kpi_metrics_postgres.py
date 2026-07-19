@@ -64,7 +64,7 @@ def load_env(env: str | None, root: Path = PROJECT_ROOT) -> list[Path]:
 
 
 SQL_FILE = PROJECT_ROOT / "Docs" / "portfolio-kpi-metrics.sql"
-REPORT_HEADER = re.compile(r"^--\s*REPORT:\s*(\w+)\s*$", re.MULTILINE)
+SECTION_HEADER = re.compile(r"^--\s*(REPORT|SETUP):\s*(\w+)\s*$", re.MULTILINE)
 
 REPORT_ALIASES: dict[str, str] = {
     "hourly": "hourly_totals",
@@ -130,24 +130,39 @@ async def apply_session_params(
     )
 
 
-def load_sql_reports(path: Path) -> dict[str, str]:
-    if not path.is_file():
-        raise SystemExit(f"SQL file not found: {path}")
-    text = path.read_text(encoding="utf-8")
-    matches = list(REPORT_HEADER.finditer(text))
-    if not matches:
-        raise SystemExit(f"No -- REPORT: markers found in {path}")
+def load_sql_sections(text: str) -> tuple[str, dict[str, str]]:
+    """Split a report SQL file into (setup_sql, {report_name: body}).
 
+    Sections are delimited by ``-- SETUP: <name>`` and ``-- REPORT: <name>``
+    header lines. SETUP bodies are concatenated verbatim; REPORT bodies are
+    each ensured to end with ';'.
+    """
+    matches = list(SECTION_HEADER.finditer(text))
+    setup_parts: list[str] = []
     reports: dict[str, str] = {}
     for i, match in enumerate(matches):
-        name = match.group(1)
+        kind = match.group(1)
+        name = match.group(2)
         start = match.end()
         end = matches[i + 1].start() if i + 1 < len(matches) else len(text)
         body = text[start:end].strip()
-        if not body.endswith(";"):
-            body = body.rstrip() + ";"
-        reports[name] = body
-    return reports
+        if kind == "SETUP":
+            if body:
+                setup_parts.append(body)
+        else:  # REPORT
+            if not body.endswith(";"):
+                body = body.rstrip() + ";"
+            reports[name] = body
+    if not reports:
+        raise SystemExit("No -- REPORT: markers found in SQL file")
+    return "\n\n".join(setup_parts), reports
+
+
+def load_sql_file_sections(path: Path) -> tuple[str, dict[str, str]]:
+    """Read a SQL file from disk and split it into (setup_sql, reports)."""
+    if not path.is_file():
+        raise SystemExit(f"SQL file not found: {path}")
+    return load_sql_sections(path.read_text(encoding="utf-8"))
 
 
 def parse_timestamp(value: str, label: str) -> datetime:
