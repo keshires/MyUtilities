@@ -258,7 +258,7 @@ async def run_reports(
 
 
 def main() -> None:
-    _load_dotenv_from_project_root()
+    load_env(None)
     parser = argparse.ArgumentParser(
         description="Portfolio KPI update log metrics (hourly volume, slow messages).",
     )
