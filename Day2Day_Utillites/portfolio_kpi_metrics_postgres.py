@@ -66,30 +66,44 @@ def load_env(env: str | None, root: Path = PROJECT_ROOT) -> list[Path]:
 SQL_FILE = PROJECT_ROOT / "Docs" / "portfolio-kpi-metrics.sql"
 REPORT_HEADER = re.compile(r"^--\s*REPORT:\s*(\w+)\s*$", re.MULTILINE)
 
-REPORT_CHOICES = (
-    "hourly",
-    "hourly_by_status",
-    "status",
-    "slow",
-    "slow_by_source",
-    "all",
-)
-
 REPORT_ALIASES: dict[str, str] = {
     "hourly": "hourly_totals",
     "hourly_by_status": "hourly_by_status",
     "status": "status_summary",
     "slow": "slow_global",
     "slow_by_source": "slow_by_source",
+    "source_update_totals": "source_update_totals",
+    "entity_counts": "triggering_entity_counts",
+    "entities_by_day": "triggering_entity_counts_by_day",
+    "portfolio_updates_by_source": "portfolio_updates_by_source",
+    "daily": "daily_totals_source",
+    "entity_source_totals": "entity_source_totals",
+    "portfolio_update_totals": "portfolio_update_totals",
+    "entities_by_day_source_status": "entities_by_day_source_status",
+    "portfolios_by_day_source_status": "portfolios_by_day_source_status",
+    "entity_by_source": "entity_by_source",
+    "portfolio_entity_source": "portfolio_entity_source",
 }
 
+REPORT_CHOICES = tuple(REPORT_ALIASES.keys()) + ("all",)
+
 ALL_REPORT_KEYS = (
+    "daily_totals_source",
     "hourly_totals",
     "hourly_by_status",
     "status_summary",
-    "slow_global",
-    "slow_by_source",
+    "source_update_totals",
+    "triggering_entity_counts",
+    "triggering_entity_counts_by_day",
+    "entities_by_day_source_status",
+    "portfolios_by_day_source_status",
 )
+
+# marker -> (index_cols, pivot_col, value_col) for Python-side pivots.
+PIVOT_SPECS: dict[str, tuple[list[str], str, str]] = {
+    "entity_by_source": (["entity_id"], "source", "refresh_count"),
+    "portfolio_entity_source": (["portfolio_id", "entity_id"], "source", "refresh_count"),
+}
 
 
 def _format_ts(value: datetime) -> str:
