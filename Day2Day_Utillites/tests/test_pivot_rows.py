@@ -40,3 +40,24 @@ def test_multi_index():
 
 def test_empty():
     assert pivot_rows([], ["entity_id"], "source", "refresh_count") == []
+
+
+def test_numeric_index_tiebreak_orders_naturally():
+    # Equal totals must break ties by natural (numeric) index order, not string order.
+    rows = [
+        {"portfolio_id": 10, "source": "A", "refresh_count": 5},
+        {"portfolio_id": 2, "source": "A", "refresh_count": 5},
+    ]
+    wide = pivot_rows(rows, ["portfolio_id"], "source", "refresh_count")
+    assert [r["portfolio_id"] for r in wide] == [2, 10]
+
+
+def test_sums_duplicate_index_pivot_pairs():
+    rows = [
+        {"entity_id": "E1", "source": "A", "refresh_count": 3},
+        {"entity_id": "E1", "source": "A", "refresh_count": 4},
+    ]
+    wide = pivot_rows(rows, ["entity_id"], "source", "refresh_count")
+    assert len(wide) == 1
+    assert wide[0]["A"] == 7
+    assert wide[0]["total"] == 7

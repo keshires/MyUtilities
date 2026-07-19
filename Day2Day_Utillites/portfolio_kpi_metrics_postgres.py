@@ -214,7 +214,10 @@ def pivot_rows(
         row["total"] = total
         wide.append(row)
 
-    wide.sort(key=lambda row: (-row["total"], tuple(str(row[c]) for c in index_cols)))
+    # Stable two-pass sort: index cols ascending in NATURAL order (each column is
+    # homogeneously typed, so int columns sort numerically), then total descending.
+    wide.sort(key=lambda row: tuple(row[c] for c in index_cols))
+    wide.sort(key=lambda row: row["total"], reverse=True)
     if top is not None:
         wide = wide[:top]
     return wide
