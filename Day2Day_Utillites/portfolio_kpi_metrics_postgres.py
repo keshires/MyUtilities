@@ -178,6 +178,48 @@ def rows_to_dicts(rows: list[asyncpg.Record]) -> list[dict[str, Any]]:
     return out
 
 
+def pivot_rows(
+    rows: list[dict[str, Any]],
+    index_cols: list[str],
+    pivot_col: str,
+    value_col: str,
+    top: int | None = None,
+) -> list[dict[str, Any]]:
+    """Pivot long-form rows to wide: one column per distinct pivot value.
+
+    Columns are ordered: index_cols, then distinct pivot values sorted
+    ascending, then 'total'. Rows are sorted by total DESC then index cols ASC,
+    and truncated to `top` rows when given.
+    """
+    if not rows:
+        return []
+
+    sources = sorted({str(r[pivot_col]) for r in rows})
+
+    aggregated: dict[tuple, dict[str, int]] = {}
+    for r in rows:
+        key = tuple(r[c] for c in index_cols)
+        bucket = aggregated.setdefault(key, {})
+        src = str(r[pivot_col])
+        bucket[src] = bucket.get(src, 0) + int(r[value_col] or 0)
+
+    wide: list[dict[str, Any]] = []
+    for key, bucket in aggregated.items():
+        row: dict[str, Any] = {c: key[i] for i, c in enumerate(index_cols)}
+        total = 0
+        for src in sources:
+            val = int(bucket.get(src, 0))
+            row[src] = val
+            total += val
+        row["total"] = total
+        wide.append(row)
+
+    wide.sort(key=lambda row: (-row["total"], tuple(str(row[c]) for c in index_cols)))
+    if top is not None:
+        wide = wide[:top]
+    return wide
+
+
 def print_table(rows: list[dict[str, Any]], title: str) -> None:
     print()
     print("=" * 80)
