@@ -133,6 +133,15 @@ to:
 from run_portfolio_kpis_postgres import PostgresSettings
 ```
 
+Also update the one call site in `main()` so the CLI keeps working after this task (Task 6 later replaces this whole `main()` body). Change the line inside `main()`:
+```python
+    _load_dotenv_from_project_root()
+```
+to:
+```python
+    load_env(None)
+```
+
 Add this function just below the imports (after the `from run_portfolio_kpis_postgres import PostgresSettings` line):
 
 ```python
@@ -1195,6 +1204,8 @@ def main() -> None:
 ```
 
 Ensure `import os` is in the import block at the top of the file (add it if missing).
+
+Note: Task 1 leaves `main()` calling `load_env(None)`; this step replaces that whole `main()` body, so the temporary call is superseded here.
 
 - [ ] **Step 4: Run the routing test + this plan's suite + `--help` smoke**
 
