@@ -243,6 +243,27 @@ def test_multi_index():
 
 def test_empty():
     assert pivot_rows([], ["entity_id"], "source", "refresh_count") == []
+
+
+def test_numeric_index_tiebreak_orders_naturally():
+    # Equal totals must break ties by natural (numeric) index order, not string order.
+    rows = [
+        {"portfolio_id": 10, "source": "A", "refresh_count": 5},
+        {"portfolio_id": 2, "source": "A", "refresh_count": 5},
+    ]
+    wide = pivot_rows(rows, ["portfolio_id"], "source", "refresh_count")
+    assert [r["portfolio_id"] for r in wide] == [2, 10]
+
+
+def test_sums_duplicate_index_pivot_pairs():
+    rows = [
+        {"entity_id": "E1", "source": "A", "refresh_count": 3},
+        {"entity_id": "E1", "source": "A", "refresh_count": 4},
+    ]
+    wide = pivot_rows(rows, ["entity_id"], "source", "refresh_count")
+    assert len(wide) == 1
+    assert wide[0]["A"] == 7
+    assert wide[0]["total"] == 7
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -291,7 +312,10 @@ def pivot_rows(
         row["total"] = total
         wide.append(row)
 
-    wide.sort(key=lambda row: (-row["total"], tuple(str(row[c]) for c in index_cols)))
+    # Stable two-pass sort: index cols ascending in NATURAL order (each column is
+    # homogeneously typed, so int columns sort numerically), then total descending.
+    wide.sort(key=lambda row: tuple(row[c] for c in index_cols))
+    wide.sort(key=lambda row: row["total"], reverse=True)
     if top is not None:
         wide = wide[:top]
     return wide
@@ -300,7 +324,7 @@ def pivot_rows(
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `.\.venv\Scripts\python -m pytest tests/test_pivot_rows.py -v`
-Expected: PASS (4 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
