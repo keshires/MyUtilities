@@ -1,5 +1,8 @@
-# Local secrets (copy from .env.example and fill in)
+# Local secrets — base and per-env files are ignored; only *.example templates are tracked.
 .env
+.env.*
+!.env.example
+!*.example
 
 # Run logs (default: logs/ at project root)
 logs/
