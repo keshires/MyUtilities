@@ -1147,22 +1147,28 @@ async def run_reports(
             rows = await conn.fetch(sql)
             dict_rows = rows_to_dicts(list(rows))
 
+            # For pivots: build the full wide table (top=None) — CSV always gets
+            # every row; only the stdout view is capped to --top.
             if is_pivot(report_key):
                 index_cols, pivot_col, value_col = PIVOT_SPECS[report_key]
-                dict_rows = pivot_rows(dict_rows, index_cols, pivot_col, value_col, top=top)
+                csv_rows = pivot_rows(dict_rows, index_cols, pivot_col, value_col, top=None)
+                display_rows = csv_rows[:top] if top is not None else csv_rows
+            else:
+                csv_rows = dict_rows
+                display_rows = dict_rows
 
             title = f"{report_key}  |  window [{window_start}] .. [{window_end})"
             if source:
                 title += f"  |  source={source!r}"
             if is_pivot(report_key) and top is not None:
-                title += f"  |  top={top}"
-            print_table(dict_rows, title)
+                title += f"  |  top={top} of {len(csv_rows)}"
+            print_table(display_rows, title)
 
             if export_csv is not None:
                 stem = export_csv.stem
                 suffix = export_csv.suffix or ".csv"
                 out = export_csv.parent / f"{stem}_{report_key}{suffix}"
-                write_csv(out, dict_rows)
+                write_csv(out, csv_rows)
                 print(f"Wrote {out.resolve()}")
     finally:
         await conn.close()
