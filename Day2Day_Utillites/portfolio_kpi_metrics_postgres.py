@@ -19,6 +19,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import csv
+import os
 import re
 import sys
 from datetime import datetime
@@ -193,6 +194,10 @@ def resolve_reports(report_arg: str) -> list[str]:
     return [key]
 
 
+def is_pivot(report_key: str) -> bool:
+    return report_key in PIVOT_SPECS
+
+
 def rows_to_dicts(rows: list[asyncpg.Record]) -> list[dict[str, Any]]:
     out: list[dict[str, Any]] = []
     for row in rows:
@@ -288,14 +293,17 @@ async def run_reports(
     report_keys: list[str],
     source: str | None,
     export_csv: Path | None,
+    top: int | None,
 ) -> int:
     if window_end <= window_start:
         raise SystemExit("--end must be after --start.")
 
-    queries = load_sql_reports(SQL_FILE)
+    setup_sql, queries = load_sql_file_sections(SQL_FILE)
     missing = [k for k in report_keys if k not in queries]
     if missing:
         raise SystemExit(f"SQL file missing report(s): {', '.join(missing)}")
+    if not setup_sql:
+        raise SystemExit("SQL file has no -- SETUP: build_temp block.")
 
     conn = await asyncpg.connect(
         host=settings.host,
@@ -307,16 +315,23 @@ async def run_reports(
     )
     try:
         await apply_session_params(conn, window_start, window_end, source)
+        # Build the temp tables ONCE for this run.
+        await conn.execute(setup_sql)
+
         for report_key in report_keys:
             sql = queries[report_key]
-            needs_source = report_key in ("slow_global", "slow_by_source")
             rows = await conn.fetch(sql)
-
             dict_rows = rows_to_dicts(list(rows))
-            title = (
-                f"{report_key}  |  window [{window_start}] .. [{window_end})"
-                + (f"  |  source={source!r}" if needs_source and source else "")
-            )
+
+            if is_pivot(report_key):
+                index_cols, pivot_col, value_col = PIVOT_SPECS[report_key]
+                dict_rows = pivot_rows(dict_rows, index_cols, pivot_col, value_col, top=top)
+
+            title = f"{report_key}  |  window [{window_start}] .. [{window_end})"
+            if source:
+                title += f"  |  source={source!r}"
+            if is_pivot(report_key) and top is not None:
+                title += f"  |  top={top}"
             print_table(dict_rows, title)
 
             if export_csv is not None:
@@ -331,50 +346,32 @@ async def run_reports(
     return 0
 
 
-def main() -> None:
-    load_env(None)
+def build_arg_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        description="Portfolio KPI update log metrics (hourly volume, slow messages).",
+        description="Portfolio KPI update log metrics (optimized temp-table reports).",
     )
-    parser.add_argument(
-        "--start",
-        required=True,
-        metavar="TIMESTAMP",
-        help='Window start (inclusive), e.g. "2026-05-20 00:00:00".',
-    )
-    parser.add_argument(
-        "--end",
-        required=True,
-        metavar="TIMESTAMP",
-        help='Window end (exclusive), e.g. "2026-05-21 00:00:00".',
-    )
-    parser.add_argument(
-        "--report",
-        required=True,
-        choices=REPORT_CHOICES,
-        help=(
-            "hourly: received vs processed per hour; "
-            "hourly_by_status: same by status; "
-            "status: counts by status; "
-            "slow: above global P95 process time; "
-            "slow_by_source: above per-source P95; "
-            "all: run every report."
-        ),
-    )
-    parser.add_argument(
-        "--source",
-        default=None,
-        metavar="NAME",
-        help='Filter slow reports to entity_refresh_message->>"source" (e.g. Custom Financials).',
-    )
-    parser.add_argument(
-        "--export-csv",
-        type=Path,
-        default=None,
-        metavar="PATH",
-        help="Write each report to CSV (filename gets _<report> suffix). Relative paths go under output/portfolio_kpi_metrics/.",
-    )
+    parser.add_argument("--start", required=True, metavar="TIMESTAMP",
+                        help='Window start (inclusive), e.g. "2026-05-20 00:00:00".')
+    parser.add_argument("--end", required=True, metavar="TIMESTAMP",
+                        help='Window end (exclusive), e.g. "2026-05-21 00:00:00".')
+    parser.add_argument("--report", required=True, choices=REPORT_CHOICES,
+                        help="Report to run (see --help for the full list). 'all' runs the aggregate set.")
+    parser.add_argument("--source", default=None, metavar="NAME",
+                        help="Scope the whole run to entity_refresh_message->>'source' (e.g. 'Custom Financials').")
+    parser.add_argument("--env", default=os.getenv("KPI_ENV"), metavar="NAME",
+                        help="Environment: loads .env.<env> ahead of base .env (e.g. ci, qa, stg, prod).")
+    parser.add_argument("--top", type=int, default=None, metavar="N",
+                        help="For pivot reports (entity_by_source, portfolio_entity_source): cap rows printed to stdout (CSV keeps all).")
+    parser.add_argument("--export-csv", type=Path, default=None, metavar="PATH",
+                        help="Write each report to CSV (filename gets _<report> suffix). Relative paths go under output/portfolio_kpi_metrics/.")
+    return parser
+
+
+def main() -> None:
+    parser = build_arg_parser()
     args = parser.parse_args()
+
+    load_env(args.env)
 
     window_start = parse_timestamp(args.start, "--start")
     window_end = parse_timestamp(args.end, "--end")
@@ -390,12 +387,8 @@ def main() -> None:
     try:
         code = asyncio.run(
             run_reports(
-                settings,
-                window_start,
-                window_end,
-                report_keys,
-                source,
-                export_path,
+                settings, window_start, window_end,
+                report_keys, source, export_path, args.top,
             )
         )
     except KeyboardInterrupt:
