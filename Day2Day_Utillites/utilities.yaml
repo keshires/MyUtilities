@@ -217,7 +217,7 @@ utilities:
     name: Portfolio KPI Metrics
     script: portfolio_kpi_metrics_postgres.py
     category: portfolio-kpi-ops
-    purpose: "Report on the portfolio_kpi_update_log: hourly volume, status breakdowns, slow-message analysis."
+    purpose: "Optimized reports on portfolio_kpi_update_log via session temp tables: daily/hourly/status volume, per-source/entity/portfolio counts, day/source/status breakdowns, 2D pivots, and slow-message analysis. Multi-env via --env."
     invocation: cli
     args:
       - flag: --start
@@ -228,10 +228,15 @@ utilities:
         help: 'Window end exclusive, e.g. "2026-05-21 00:00:00".'
       - flag: --report
         required: true
-        choices: [hourly, hourly_by_status, status, slow, slow_by_source, all]
+        choices: [daily, hourly, hourly_by_status, status, source_update_totals, portfolio_updates_by_source, portfolio_update_totals, entity_counts, entity_source_totals, entities_by_day, entities_by_day_source_status, portfolios_by_day_source_status, entity_by_source, portfolio_entity_source, slow, slow_by_source, all]
         help: "Which report to run."
       - flag: --source
-        help: 'Filter slow reports to a source (e.g. "Custom Financials").'
+        help: 'Scope the whole run to a source (e.g. "Custom Financials").'
+      - flag: --env
+        help: "Load .env.<env> ahead of base .env (ci, qa, stg, prod)."
+      - flag: --top
+        type: int
+        help: "Cap stdout rows for pivot reports (entity_by_source, portfolio_entity_source)."
       - flag: --export-csv
         help: "Write each report to CSV (relative → output/portfolio_kpi_metrics/)."
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
