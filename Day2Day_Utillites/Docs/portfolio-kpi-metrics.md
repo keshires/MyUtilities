@@ -77,7 +77,7 @@ SELECT
 |---------|---------|
 | `window_start` | Inclusive lower bound |
 | `window_end` | Exclusive upper bound |
-| `source_filter` | Optional for slow reports — `''` = all, or `'Custom Financials'` |
+| `source_filter` | `''` = all sources; else e.g. `'Custom Financials'` — **scopes the whole run** (applied when SETUP builds the temp tables) |
 
 Select the **PARAMS** block and **Execute** (Ctrl+Enter) **once per DBeaver session** (or after you change the window).
 
@@ -91,7 +91,7 @@ so re-run SETUP whenever you change the PARAMS window/source.
 
 ### Step 2 — Run any report
 
-Each report reads session params via a `params` CTE — **no timestamps inside the query body**.
+Each report reads from the SETUP temp tables (`tmp_kpi_window` / `tmp_kpi_entity`) — **no timestamps inside the query body**.
 
 1. Select one report block (from `-- REPORT: ...` through its ending `;`).
 2. **Execute SQL statement** (Ctrl+Enter).
@@ -102,9 +102,20 @@ You can run different reports without editing dates again, as long as you execut
 
 | `-- REPORT:` tag | Python `--report` |
 |------------------|-------------------|
+| `daily_totals_source` | `daily` |
 | `hourly_totals` | `hourly` |
 | `hourly_by_status` | `hourly_by_status` |
 | `status_summary` | `status` |
+| `source_update_totals` | `source_update_totals` |
+| `portfolio_updates_by_source` | `portfolio_updates_by_source` |
+| `portfolio_update_totals` | `portfolio_update_totals` |
+| `triggering_entity_counts` | `entity_counts` |
+| `entity_source_totals` | `entity_source_totals` |
+| `triggering_entity_counts_by_day` | `entities_by_day` |
+| `entities_by_day_source_status` | `entities_by_day_source_status` |
+| `portfolios_by_day_source_status` | `portfolios_by_day_source_status` |
+| `entity_by_source` | `entity_by_source` |
+| `portfolio_entity_source` | `portfolio_entity_source` |
 | `slow_global` | `slow` |
 | `slow_by_source` | `slow_by_source` |
 
