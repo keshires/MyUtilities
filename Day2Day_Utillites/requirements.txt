@@ -13,3 +13,9 @@ python-dotenv>=1.0.0
 
 # DynamoDB (DynamoDB_BatchUpdate_CreatedBy.py)
 boto3>=1.28.0
+
+# Catalog dashboard (dashboard/serve.py)
+fastapi>=0.110
+uvicorn>=0.30
+pydantic>=2.6,<3
+PyYAML>=6.0

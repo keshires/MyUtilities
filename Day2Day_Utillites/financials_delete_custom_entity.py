@@ -17,13 +17,17 @@ from __future__ import annotations
 
 import argparse
 import json
+import logging
 import os
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 import requests
 from dotenv import load_dotenv
+
+from project_paths import logs_dir
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
@@ -121,6 +125,15 @@ def main() -> int:
             "Provide entity ids via --entity-id or set EDFX_DELETE_ENTITY_IDS in .env."
         )
 
+    _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    _log_path = logs_dir("delete_custom_entity") / f"delete_custom_entity_{_ts}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.FileHandler(_log_path, encoding="utf-8"), logging.StreamHandler()],
+    )
+    logging.info("delete_custom_entity run start; entity ids=%s", entity_ids)
+
     cookie_val = (args.cookie or "").strip() or (
         os.environ.get("EDFX_COOKIE") or ""
     ).strip()
@@ -138,14 +151,17 @@ def main() -> int:
             )
         except requests.RequestException as ex:
             print(f"Request failed: {ex}", file=sys.stderr)
+            logging.info("deleted %s -> request failed: %s", eid, ex)
             failed += 1
             continue
 
         _print_response(resp)
+        logging.info("deleted %s -> %s", eid, resp.status_code)
         if not resp.ok:
             failed += 1
 
     print(f"\nDone. {len(entity_ids) - failed} ok, {failed} failed.")
+    logging.info("delete_custom_entity run done; %s ok, %s failed", len(entity_ids) - failed, failed)
     return 0 if failed == 0 else 1
 
 

@@ -13,8 +13,8 @@ Uses ``TESSERA_POSTGRES_*`` from environment or project root .env (python-dotenv
 
 Example:
   python export_stale_entities_from_excel.py ^
-    --input "C:\\Github\\MyUtilities\\Day2Day_Utillites\\inputfiles\\StaleEntityRefresh\\Entit_Refresh_Queue_Data_May8th.xlsx"
-  # Default CSV: output/stale_entities/stale_external_ids_<utc>.csv
+    --input "C:\\Github\\MyUtilities\\Day2Day_Utillites\\input\\export_stale_entities\\Entit_Refresh_Queue_Data_May8th.xlsx"
+  # Default CSV: output/export_stale_entities/stale_external_ids_<utc>.csv
 """
 
 from __future__ import annotations
@@ -31,7 +31,7 @@ import asyncpg
 import pandas as pd
 from dotenv import load_dotenv
 
-from project_paths import output_dir, resolve_cli_artifact
+from project_paths import input_dir, output_dir, resolve_cli_artifact
 
 log = logging.getLogger(__name__)
 
@@ -165,9 +165,7 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
     p.add_argument(
         "--input",
         type=Path,
-        default=root
-        / "inputfiles"
-        / "StaleEntityRefresh"
+        default=input_dir("export_stale_entities")
         / "Entit_Refresh_Queue_Data_May8th.xlsx",
         help="Excel file containing column external_id",
     )
@@ -176,8 +174,8 @@ def parse_args(argv: list[str] | None) -> argparse.Namespace:
         type=Path,
         default=None,
         help=(
-            "CSV path (default: output/stale_entities/stale_external_ids_<utc>.csv). "
-            "Relative paths are under output/stale_entities/."
+            "CSV path (default: output/export_stale_entities/stale_external_ids_<utc>.csv). "
+            "Relative paths are under output/export_stale_entities/."
         ),
     )
     p.add_argument(
@@ -216,9 +214,9 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.output is None:
         ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
-        args.output = output_dir("stale_entities") / f"stale_external_ids_{ts}.csv"
+        args.output = output_dir("export_stale_entities") / f"stale_external_ids_{ts}.csv"
     else:
-        args.output = resolve_cli_artifact(args.output, "stale_entities")
+        args.output = resolve_cli_artifact(args.output, "export_stale_entities")
 
     n = asyncio.run(
         export_stale_distinct_external_ids(

@@ -1,0 +1,96 @@
+---
+name: stale-entity-refresh
+description: Use when refreshing or reconciling stale non-public (private/custom) entities, or running the monthly stale-entity refresh — finding which external ids are stale by pd_last_known_date, exporting them, submitting refreshes via the Tessera refreshEntities API, or verifying a refresh actually advanced the PD.
+---
+
+# Stale Entity Refresh
+
+Tools live in `Day2Day_Utillites/`. Run everything from that folder with its venv
+(`.\.venv\Scripts\python`), with `.env` populated. Canonical args/env for every command are in
+`Day2Day_Utillites/utilities.yaml` (browse via the dashboard, bottom). Full monthly procedure:
+`Day2Day_Utillites/Docs/monthly-stale-refresh-runbook.md`.
+
+## Three corrections that matter (get these wrong and the run is invalid)
+
+- **Measure staleness by `--stale-date-column pd_last_known_date`, NOT the default `updated_date`.**
+  A refresh bumps `updated_date` even when the PD doesn't advance, so `updated_date` makes the queue
+  look caught up when it isn't. `pd_last_known_date` is the true signal.
+- **Exclude the deprecated giant** by setting `STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB`
+  in `.env`. This also *includes* `0014000000NXtS8` (the script's built-in default excludes it).
+- **One entity per request + iterate (temporary).** `--one-per-request` is a **workaround** for a
+  batch bug fixed in [edfx-tessera-service PR #2541](https://github.com/moodysanalytics/edfx-tessera-service/pull/2541),
+  **not yet in prod**. Once it ships, switch back: drop `--one-per-request`, use `--batch-size` ~10
+  (private) / ~100 (custom). `refreshEntities` also **enqueues asynchronously** — a 200 means
+  "Submitted", NOT that the PD moved; the SQS consumer recomputes downstream. **Re-validate only
+  after the refresh queue drains**, not just when Postgres looks settled (low mid-processing yield is
+  expected, not failure). Iterate on the residual until it plateaus. (Verified from source — see
+  memory `edfx-refresh-mechanics`.)
+
+## Monthly run (custom + private, by PD date)
+
+Same commands every month — `--date-filter` defaults to the 1st of the current month (August
+auto-targets `2026-08-01`; override with `--date-filter YYYY-MM-01`).
+
+1. **Find stale (read-only)** — per type, writes CSV + `.summary.json`:
+   `python validate_stale_entities.py --entity-type custom --stale-date-column pd_last_known_date`
+   (repeat with `--entity-type private`; one tenant only: add `--tenant-id <id>`).
+2. **Dry-run** (no posting, confirm count):
+   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --dry-run`
+3. **Live refresh** (posts to prod queue):
+   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --workers 20`
+   (repeat with `--entity-type private`).
+4. **Re-validate after the queue settles** (repeat step 1); re-run step 3 on any residual until it plateaus.
+5. **Spot-verify (optional):** `python test_single_entity_refresh.py --entity-type custom --count 10`
+   — submits a few individually and polls until `pd_last_known_date` advances.
+
+## PD eligibility validation report (`validate_pd_precheck.py`) — team command
+
+**Command** (run from `Day2Day_Utillites`, read-only, never posts):
+```powershell
+.\.venv\Scripts\python validate_pd_precheck.py --entity-type custom    # or: private | public
+#   --date-filter YYYY-MM-01   (default: 1st of the current month)
+#   --limit N                  (sample a subset for a quick look)
+```
+
+**Purpose:** before posting anything to `refreshEntities`, determine which stale entities are
+actually *eligible / worth* refreshing — so the team avoids futile queue posts and gets an
+actionable data-quality view (orphans to clean up; custom financials not completed).
+
+**What it does:** finds stale entities (`pd_last_known_date < 1st-of-month`, with `financialStmtDate ≤3y`), then:
+- **private / custom** — authoritative PD check via `/edfx/v1/entities/pds` (custom id =
+  `externalId-financialsProcessId`); if pds has no data → `/entity/v1/mapping`; in **neither ⇒ orphaned**.
+- **public** — DB-only, report-only (`public_fresh` = current-month PD + Active/null status, else `public_stale`).
+
+**Buckets:** `current_pd`/`refreshable` → POST (worth refreshing) · `no_pd`/`source_stale`/`mapped_no_pd` → SKIP (futile) · `orphaned` → SKIP + delete-candidate.
+
+**Outputs** (`output/validate_pd_precheck/` + `.summary.json` in `logs/validate_pd_precheck/`):
+- `pd_precheck_<type>_<ts>.csv` — every stale entity + category/action/reason (+ `financials_process_status` for custom).
+- `…orphaned.csv` — delete-candidates.
+- `…financials_not_completed.csv` (**custom only**) — entities whose `financials_process_status <> Completed`.
+
+**Prereqs:** `.env` needs `TESSERA_POSTGRES_*` (all) + `MOODYS_SSO_*` / `TESSERA_BASE_URL` (private/custom) + `STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB`.
+Design: `docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md`.
+(The refresh's `--pd-precheck` flag uses the older DB-max peer heuristic; this report is the authoritative pds path.)
+
+Outputs: `output/<script>/…` (CSVs, snapshots) and `logs/<script>/…` (run log + `.summary.json`).
+
+## PD-date rule per type
+- **Custom:** PD lands on the **1st** of the month (fresh = pd_last_known_date == 1st).
+- **Private:** PD lands **any day** in the current month (vendor-dependent).
+- Both share the stale cutoff `pd_last_known_date < 1st-of-month`; only `--entity-type` differs.
+- **Public** entities are vendor-driven (refreshed by the separate daily `edfx-portfolio-refresh-batch`) — not refreshable here; report-only via the validation report.
+
+## Safety
+- `refresh_*` and `test_single_*` **write to prod** via Tessera. Dry-run, small `--limit`/`--count`, verify, then scale.
+- `validate_*` / `export_*` are read-only Postgres queries.
+
+## Prereqs
+`.env` must have `MOODYS_SSO_USERNAME`, `MOODYS_SSO_PASSWORD`, `TESSERA_BASE_URL`, the
+`TESSERA_POSTGRES_*` group, and `STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB`.
+
+## Dashboard
+```powershell
+cd Day2Day_Utillites
+.\.venv\Scripts\python -m uvicorn dashboard.serve:app --host 127.0.0.1 --port 8021
+# http://127.0.0.1:8021/app/ — cards, copy-ready commands, recent run history.
+```

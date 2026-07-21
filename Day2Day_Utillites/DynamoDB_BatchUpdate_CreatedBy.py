@@ -63,7 +63,10 @@ from botocore.config import Config
 from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
 import sys
-from datetime import datetime
+import logging
+from datetime import datetime, timezone
+
+from project_paths import logs_dir
 
 # ==================== ENVIRONMENT SELECTION ====================
 # Change this to switch between QA and PROD
@@ -326,6 +329,18 @@ def main():
     """Main entry point."""
     config = get_active_config()
 
+    _ts = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    _log_path = logs_dir("dynamodb_batch_update") / f"dynamodb_batch_update_{_ts}.log"
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(message)s",
+        handlers=[logging.FileHandler(_log_path, encoding="utf-8"), logging.StreamHandler()],
+    )
+    logging.info(
+        "dynamodb_batch_update start; DRY_RUN=%s table=%s find=%r set=%r",
+        DRY_RUN, config["TABLE_NAME"], CURRENT_VALUE_TO_FIND, NEW_VALUE_TO_SET,
+    )
+
     # Header
     print("\n" + "=" * 70)
     print("DynamoDB Batch Update Script")
@@ -424,6 +439,13 @@ def main():
     print(f"  Time:             {elapsed:.2f}s")
     print(f"  Started:          {start_time.strftime('%Y-%m-%d %H:%M:%S')}")
     print(f"  Finished:         {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+    logging.info(
+        "dynamodb_batch_update summary; environment=%s table=%s dry_run=%s "
+        "total_processed=%s successful=%s skipped=%s errors=%s elapsed=%.2fs",
+        config["DESCRIPTION"], config["TABLE_NAME"], DRY_RUN,
+        len(records), success, skipped, errors_count, elapsed,
+    )
 
     if error_details:
         print(f"\n{'='*60}")

@@ -1,11 +1,23 @@
-# Local secrets (copy from .env.example and fill in)
+# Local secrets — base and per-env files are ignored; only *.example templates are tracked.
 .env
+.env.*
+!.env.example
+!*.example
 
 # Run logs (default: logs/ at project root)
 logs/
 
 # Generated CSV / JSON / Excel exports (see project_paths.py)
 output/
+
+# Local input files a utility reads (per-utility folders)
+input/
+
+# Local input files (test fixtures, bulk-upload data — not tracked)
+inputfiles/
+
+# Generated output files (Spark exports, etc. — not tracked)
+outputfiles/
 
 # Python / tooling
 .venv/
