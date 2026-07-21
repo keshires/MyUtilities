@@ -44,7 +44,7 @@ CLI `--report` alias → SQL `-- REPORT:` marker:
 | `portfolio_entity_source` | `portfolio_entity_source` | **new pivot (#3b)** |
 | `all` | (runs the aggregate set below) | — |
 
-`all` marker set: `daily_totals_source, hourly_totals, hourly_by_status, status_summary, source_update_totals, triggering_entity_counts, triggering_entity_counts_by_day, entities_by_day_source_status, portfolios_by_day_source_status` (excludes the two slow-detail reports and the two large pivots).
+`all` marker set: `daily_totals_source, hourly_totals, hourly_by_status, status_summary, source_update_totals, entity_source_totals, triggering_entity_counts_by_day, entities_by_day_source_status, portfolios_by_day_source_status` (aggregate reports only — excludes the two slow-detail reports, the two large pivots, and the large per-entity `triggering_entity_counts`).
 
 Pivot specs (`marker → (index_cols, pivot_col, value_col)`):
 - `entity_by_source → (["entity_id"], "source", "refresh_count")`
@@ -362,6 +362,30 @@ def test_all_expands_to_marker_set():
     assert "entity_by_source" not in keys   # pivots excluded from all
 
 
+def test_all_is_exact_aggregate_set():
+    # `all` is aggregate-only: uses per-source entity_source_totals, NOT the
+    # large per-entity triggering_entity_counts, and no slow/pivot reports.
+    assert set(mod.resolve_reports("all")) == {
+        "daily_totals_source",
+        "hourly_totals",
+        "hourly_by_status",
+        "status_summary",
+        "source_update_totals",
+        "entity_source_totals",
+        "triggering_entity_counts_by_day",
+        "entities_by_day_source_status",
+        "portfolios_by_day_source_status",
+    }
+    for excluded in (
+        "triggering_entity_counts",
+        "slow_global",
+        "slow_by_source",
+        "entity_by_source",
+        "portfolio_entity_source",
+    ):
+        assert excluded not in mod.resolve_reports("all")
+
+
 def test_alias_maps_to_marker():
     assert mod.resolve_reports("daily") == ["daily_totals_source"]
     assert mod.resolve_reports("status") == ["status_summary"]
@@ -427,11 +451,13 @@ ALL_REPORT_KEYS = (
     "hourly_by_status",
     "status_summary",
     "source_update_totals",
-    "triggering_entity_counts",
+    "entity_source_totals",
     "triggering_entity_counts_by_day",
     "entities_by_day_source_status",
     "portfolios_by_day_source_status",
 )
+# NOTE: `all` is aggregate-only. It uses the small per-source `entity_source_totals`,
+# NOT the large per-entity `triggering_entity_counts` (run that one explicitly).
 
 # marker -> (index_cols, pivot_col, value_col) for Python-side pivots.
 PIVOT_SPECS: dict[str, tuple[list[str], str, str]] = {
@@ -457,7 +483,7 @@ def resolve_reports(report_arg: str) -> list[str]:
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `.\.venv\Scripts\python -m pytest tests/test_report_registry.py -v`
-Expected: PASS (5 tests).
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
