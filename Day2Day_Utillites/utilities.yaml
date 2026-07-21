@@ -1,0 +1,336 @@
+categories:
+  - id: stale-entity-refresh
+    name: Stale Entity Refresh
+  - id: portfolio-kpi-ops
+    name: Portfolio KPI Ops
+  - id: edfx-entity-ops
+    name: EDFX Entity Ops
+  - id: dynamo-batch-update
+    name: DynamoDB Batch Update
+
+utilities:
+  # ---------------- stale-entity-refresh ----------------
+  - id: export-stale-entities-from-excel
+    name: Export Stale Entities from Excel
+    script: export_stale_entities_from_excel.py
+    category: stale-entity-refresh
+    purpose: "Read external_id column from Excel, find entities not updated in N days, export distinct stale ids to CSV."
+    invocation: cli
+    args:
+      - flag: --input
+        default: "input/export_stale_entities/Entit_Refresh_Queue_Data_May8th.xlsx"
+        help: "Excel file containing an external_id column."
+      - flag: --output
+        help: "CSV path. Default output/export_stale_entities/stale_external_ids_<utc>.csv."
+      - flag: --stale-days
+        type: int
+        default: 10
+        help: "Include an id only if no entity row was updated within this many days."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      output_glob: "export_stale_entities/stale_external_ids_*"
+    docs: []
+    safety: "Read-only against prod Postgres."
+
+  - id: validate-stale-entities
+    name: Validate / Reconcile Stale Entities
+    script: validate_stale_entities.py
+    category: stale-entity-refresh
+    purpose: "Re-run the stale query and export every still-stale entity to CSV with entity_data flattened."
+    invocation: cli
+    args:
+      - flag: --entity-type
+        choices: [custom, private]
+        default: private
+        help: "custom (custom_id NOT NULL) or private (custom_id NULL)."
+      - flag: --date-filter
+        help: "Stale cutoff YYYY-MM-DD. Default first of current month."
+      - flag: --all-entities
+        type: bool
+        help: "Include all matching entities, ignore the stale-date filter."
+      - flag: --tenant-id
+        help: "Restrict to a single tenant_id."
+      - flag: --limit
+        type: int
+        help: "Cap rows written (testing)."
+      - flag: --output
+        help: "CSV path. Default output/validate_stale_entities/stale_reconcile_<type>_<utc>.csv."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      logs_glob: "validate_stale_entities/validate_stale_entities_*"
+      output_glob: "validate_stale_entities/stale_reconcile_*"
+      summary_suffix: ".summary.json"
+    docs: ["docs/superpowers/specs/2026-07-02-stale-entity-reconciliation-export-design.md"]
+    safety: "Read-only against prod Postgres. Report, not a pass/fail gate."
+
+  - id: refresh-stale-non-public-entities
+    name: Refresh Stale Non-Public Entities
+    script: refresh_stale_non_public_entities.py
+    category: stale-entity-refresh
+    purpose: "Refresh stale private/custom entities via the Tessera refreshEntities API in batches with retries, per-tenant iteration, and resume."
+    invocation: cli
+    args:
+      - flag: --entity-type
+        choices: [custom, private, customized]
+        default: private
+        help: "custom (non-public-customized; alias 'customized') or private (non-public). Not argparse-enforced. Default: STALE_REFRESH_ENTITY_TYPE or 'private'."
+      - flag: --date-filter
+        help: "Stale cutoff YYYY-MM-DD. Default first of current month."
+      - flag: --stale-date-column
+        choices: [updated_date, pd_last_known_date]
+        default: updated_date
+        help: "Column compared against the stale cutoff. Default: STALE_REFRESH_STALE_DATE_COLUMN or 'updated_date'."
+      - flag: --batch-size
+        type: int
+        default: 15000
+        help: "Entities per API payload. Default overridable via STALE_REFRESH_BATCH_SIZE."
+      - flag: --limit
+        type: int
+        help: "Cap total entities (testing)."
+      - flag: --resume-from-batch
+        type: int
+        default: 1
+        help: "Skip batches before this number (1-based) to resume a stopped run."
+      - flag: --workers
+        type: int
+        default: 3
+        help: "Parallel API submission workers. 1 = sequential. Default overridable via STALE_REFRESH_WORKERS."
+      - flag: --financial-max-age-years
+        type: int
+        default: 3
+        help: "Only refresh entities whose financialStmtDate is missing or within N years. 0 disables. Default overridable via STALE_REFRESH_FINANCIAL_MAX_AGE_YEARS."
+      - flag: --max-retries
+        type: int
+        default: 4
+        help: "Retry attempts with exponential backoff on 429/5xx or network errors. 0 disables. Default overridable via STALE_REFRESH_MAX_RETRIES."
+      - flag: --dry-run
+        type: bool
+        help: "Query DB and log batches without calling refreshEntities."
+      - flag: --tenant-id
+        help: "Restrict refresh to a single tenant_id. The excluded-tenant list still applies."
+      - flag: --per-tenant
+        type: bool
+        help: "Refresh tenant-by-tenant: discover every tenant with stale entities (minus excluded) and process each separately. Mutually exclusive with --tenant-id; incompatible with --resume-from-batch."
+      - flag: --one-per-request
+        type: bool
+        help: "Submit exactly one external_id per refreshEntities call (batch size 1). Slower, but avoids large-payload failures."
+      - flag: --tenant-checkpoint
+        help: "Per-tenant checkpoint file (use with --per-tenant). Tenants already listed are skipped; each tenant is appended as it completes."
+      - flag: --all-entities
+        type: bool
+        help: "Include all matching entities, not only those stale by --date-filter."
+    env_required: [MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL, TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      logs_glob: "refresh_stale_entities/refresh_stale_entities_*"
+      summary_suffix: ".summary.json"
+    docs: ["docs/superpowers/specs/2026-07-02-selectable-staleness-date-column-design.md"]
+    safety: "Writes to prod via Tessera refreshEntities. ALWAYS run --dry-run first."
+
+  - id: test-single-entity-refresh
+    name: Verify Single Entity Refresh
+    script: test_single_entity_refresh.py
+    category: stale-entity-refresh
+    purpose: "Refresh the top-N stale entities one at a time and poll until pd_last_known_date advances — used to verify the refresh path end-to-end."
+    invocation: cli
+    args:
+      - flag: --count
+        type: int
+        default: 10
+        help: "Number of top stale entities to test."
+      - flag: --entity-type
+        choices: [custom, private]
+        default: custom
+        help: "custom or private."
+      - flag: --date-filter
+        help: "Stale cutoff YYYY-MM-DD. Default first of month."
+      - flag: --financial-max-age-years
+        type: int
+        help: "Only include entities with financialStmtDate missing or within N years. 0 disables."
+      - flag: --max-wait
+        type: int
+        default: 180
+        help: "Seconds to poll for pd_last_known_date to advance."
+      - flag: --interval
+        type: int
+        default: 30
+        help: "Poll interval seconds."
+      - flag: --recheck-from
+        help: "Skip submit; re-compare against a saved before-snapshot JSON."
+    env_required: [MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL, TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      logs_glob: "verify_single_entity_refresh/test_single_entity_refresh_*"
+      output_glob: "verify_single_entity_refresh/*"
+    docs: []
+    safety: "Submits real refreshes for a handful of entities. Keep --count small."
+
+  - id: validate-pd-precheck
+    name: PD Pre-Check Report
+    script: validate_pd_precheck.py
+    category: stale-entity-refresh
+    purpose: "PD refresh-eligibility validation. Classify stale entities (by pd_last_known_date, financialStmtDate<=3y) into refreshable/orphaned/no-pd buckets using the authoritative /edfx/v1/entities/pds check (private=externalId, custom=externalId-financialsProcessId), with /entity/v1/mapping fallback (empty => orphaned/delete-candidate). Custom also flags financials_process_status<>Completed (financials_not_completed.csv). Public is DB-only (fresh = current-month PD + Active/null status). Read-only; never posts."
+    invocation: cli
+    args:
+      - flag: --entity-type
+        required: true
+        choices: [custom, private, public]
+        help: "custom, private, or public (public is report-only, DB-only)."
+      - flag: --date-filter
+        help: "Stale cutoff YYYY-MM-DD. Default first of current month."
+      - flag: --limit
+        type: int
+        help: "Cap entities (testing/sampling)."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD, MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL]
+    outputs:
+      logs_glob: "validate_pd_precheck/pd_precheck_*"
+      output_glob: "validate_pd_precheck/*"
+      summary_suffix: ".summary.json"
+    docs: ["docs/superpowers/specs/2026-07-15-pd-aware-presubmission-validation-design.md"]
+    safety: "Read-only (Postgres + pds/mapping GETs). Never posts. SSO needed for private/custom (pds/mapping); public needs only Postgres."
+
+  # ---------------- portfolio-kpi-ops ----------------
+  - id: run-portfolio-kpis-postgres
+    name: Run Portfolio KPIs
+    script: run_portfolio_kpis_postgres.py
+    category: portfolio-kpi-ops
+    purpose: "List portfolio ids and/or run the calculate_portfolio_kpis(id) stored procedure per portfolio."
+    invocation: cli
+    args:
+      - flag: --portfolio-id
+        help: "Run only this portfolio id (repeat for multiple). Skips reading the portfolio table."
+      - flag: --portfolio-ids
+        help: "Comma-separated portfolio ids."
+      - flag: --tenant-id
+        help: "Only load portfolio rows for this tenant (requires DB read)."
+      - flag: --list-only
+        type: bool
+        help: "Log the id list; do not call calculate_portfolio_kpis."
+      - flag: --export-list
+        help: "Write portfolio_id column to this CSV (relative → output/run_portfolio_kpis/)."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      logs_glob: "run_portfolio_kpis/run_portfolio_kpis_postgres_*"
+      output_glob: "run_portfolio_kpis/*"
+    docs: ["Day2Day_Utillites/Docs/run-portfolio-kpis-postgres.md"]
+    safety: "Executes a stored procedure that recomputes KPIs on prod. Use --list-only to preview."
+
+  - id: portfolio-kpi-metrics-postgres
+    name: Portfolio KPI Metrics
+    script: portfolio_kpi_metrics_postgres.py
+    category: portfolio-kpi-ops
+    purpose: "Optimized reports on portfolio_kpi_update_log via session temp tables: daily/hourly/status volume, per-source/entity/portfolio counts, day/source/status breakdowns, 2D pivots, and slow-message analysis. Multi-env via --env."
+    invocation: cli
+    args:
+      - flag: --start
+        required: true
+        help: 'Window start inclusive, e.g. "2026-05-20 00:00:00".'
+      - flag: --end
+        required: true
+        help: 'Window end exclusive, e.g. "2026-05-21 00:00:00".'
+      - flag: --report
+        required: true
+        choices: [daily, hourly, hourly_by_status, status, source_update_totals, portfolio_updates_by_source, portfolio_update_totals, entity_counts, entity_source_totals, entities_by_day, entities_by_day_source_status, portfolios_by_day_source_status, entity_by_source, portfolio_entity_source, slow, slow_by_source, all]
+        help: "Which report to run."
+      - flag: --source
+        help: 'Scope the whole run to a source (e.g. "Custom Financials").'
+      - flag: --env
+        help: "Load .env.<env> ahead of base .env (ci, qa, stg, prod)."
+      - flag: --top
+        type: int
+        help: "Cap stdout rows for pivot reports (entity_by_source, portfolio_entity_source)."
+      - flag: --export-csv
+        help: "Write each report to CSV (relative → output/portfolio_kpi_metrics/)."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      output_glob: "portfolio_kpi_metrics/*"
+    docs: ["Day2Day_Utillites/Docs/portfolio-kpi-metrics.md"]
+    safety: "Read-only against prod Postgres."
+
+  # ---------------- edfx-entity-ops ----------------
+  - id: financials-delete-custom-entity
+    name: Delete Custom Entity
+    script: financials_delete_custom_entity.py
+    category: edfx-entity-ops
+    purpose: "DELETE one or many custom entities via the EDFX Financials API."
+    invocation: cli
+    args:
+      - flag: --entity-id
+        help: "One UUID or comma-separated list. Falls back to EDFX_DELETE_ENTITY_IDS env."
+      - flag: --token
+        help: "OAuth bearer token (no 'Bearer ' prefix). Falls back to EDFX_TOKEN env."
+      - flag: --base-url
+        help: "API host base URL."
+      - flag: --cookie
+        help: "Optional Cookie header value."
+      - flag: --timeout
+        type: int
+        default: 60
+        help: "Request timeout seconds."
+    env_required: [EDFX_TOKEN, EDFX_DELETE_ENTITY_IDS, EDFX_COOKIE]
+    outputs:
+      logs_glob: "delete_custom_entity/delete_custom_entity_*"
+    docs: []
+    safety: "DESTRUCTIVE: permanently deletes entities on prod. Double-check ids first."
+
+  - id: edfx-process-status
+    name: EDFX Process Status
+    script: EDFX_ProcessStatus.py
+    category: edfx-entity-ops
+    purpose: "Authenticate via SSO, load process ids from Postgres, fetch statuses in parallel, write a multi-sheet Excel error report."
+    invocation: env-config
+    args: []
+    env_required: [MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, EDFX_BASE_URL, EDFX_OUTPUT_FOLDER, TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    outputs:
+      output_glob: "edfx_process_status/*"
+    docs: []
+    safety: "Read-only diagnostics. Configure the run via .env before launching."
+
+  - id: build-opensearch-entity-query-from-csv
+    name: Build OpenSearch Entity Query
+    script: build_opensearch_entity_query_from_csv.py
+    category: edfx-entity-ops
+    purpose: "Build OpenSearch _search JSON and queries payload files from a CSV companyIdentifier column, chunked."
+    invocation: cli
+    args:
+      - flag: --csv
+        help: "CSV path. Default: newest *.csv under input/build_opensearch_query/."
+      - flag: --tenant-id
+        help: "tenantId.keyword value. Falls back to OPENSEARCH_TENANT_ID env."
+      - flag: --size
+        type: int
+        default: 10
+        help: "Search size."
+      - flag: --output-dir
+        help: "Write full + chunked + payload JSON here (relative → output/build_opensearch_query/)."
+      - flag: --out
+        help: "Write OpenSearch _search JSON only to this path."
+      - flag: --queries-out
+        help: "Write queries payload only (chunked)."
+      - flag: --queries-entities-per-file
+        type: int
+        default: 100
+        help: "Max unique entities per queries JSON file."
+      - flag: --distinct-count
+        type: bool
+        help: "Print distinct id count/row stats; write no files."
+      - flag: --opensearch-result-cap
+        type: int
+        help: "Max size in generated OpenSearch bodies under --output-dir."
+    env_required: [OPENSEARCH_TENANT_ID]
+    outputs:
+      output_glob: "build_opensearch_query/*"
+    docs: []
+    safety: "Local file generation only. No network or DB."
+
+  # ---------------- dynamo-batch-update ----------------
+  - id: dynamodb-batch-update-createdby
+    name: DynamoDB Batch Update (CreatedBy)
+    script: DynamoDB_BatchUpdate_CreatedBy.py
+    category: dynamo-batch-update
+    purpose: "Scan a DynamoDB table and batch-update a field value, with dry-run safety and parallel writes."
+    invocation: env-config
+    args: []
+    env_required: [AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_DEFAULT_REGION]
+    outputs:
+      logs_glob: "dynamodb_batch_update/dynamodb_batch_update_*"
+    docs: []
+    safety: "DESTRUCTIVE when DRY_RUN=False. Edit the in-script config constants; keep DRY_RUN=True until verified."

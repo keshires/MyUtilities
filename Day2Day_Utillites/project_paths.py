@@ -1,4 +1,4 @@
-"""Day2Day Utilities — central layout: logs under ``logs/``, generated files under ``output/<category>/``.
+"""Day2Day Utilities — central layout: per-utility folders under ``input/<utility>/``, ``output/<utility>/``, and ``logs/<utility>/``.
 
 Relative paths from CLI or from ``.env`` (when documented) resolve against the
 project root so runs are consistent regardless of current working directory.
@@ -11,9 +11,11 @@ from pathlib import Path
 PROJECT_ROOT = Path(__file__).resolve().parent
 
 
-def logs_dir() -> Path:
-    """``<repo>/logs`` — runtime logs only."""
+def logs_dir(*parts: str) -> Path:
+    """``<repo>/logs/<parts...>/`` — runtime logs. No args → flat ``<repo>/logs``."""
     d = PROJECT_ROOT / "logs"
+    for p in parts:
+        d = d / p
     d.mkdir(parents=True, exist_ok=True)
     return d
 
@@ -21,6 +23,15 @@ def logs_dir() -> Path:
 def output_dir(*parts: str) -> Path:
     """``<repo>/output/<parts...>/`` — CSV/JSON/Excel artifacts."""
     d = PROJECT_ROOT / "output"
+    for p in parts:
+        d = d / p
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def input_dir(*parts: str) -> Path:
+    """``<repo>/input/<parts...>/`` — input files a utility reads."""
+    d = PROJECT_ROOT / "input"
     for p in parts:
         d = d / p
     d.mkdir(parents=True, exist_ok=True)

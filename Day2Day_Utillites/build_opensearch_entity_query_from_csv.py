@@ -38,20 +38,20 @@ there are more unique ids, multiple JSON files are written: ``queries_1.json``,
 Or pass both ``--out`` and ``--queries-out`` with different paths (single OpenSearch
 file uses ``--size`` as today).
 
-Example (single directory, two artifacts; relative ``--output-dir`` → ``output/opensearch_queries/``):
+Example (single directory, two artifacts; relative ``--output-dir`` → ``output/build_opensearch_query/``):
   python build_opensearch_entity_query_from_csv.py ^
     --tenant-id <your-tenant-id> ^
-    --csv "C:\\Github\\MyUtilities\\Day2Day_Utillites\\BulkUplaodFiles\\your_file.csv" ^
+    --csv "C:\\Github\\MyUtilities\\Day2Day_Utillites\\input\\build_opensearch_query\\your_file.csv" ^
     --output-dir my_export_run
 
-Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/opensearch_queries/``):
+Example (explicit paths; relative ``--out`` / ``--queries-out`` → ``output/build_opensearch_query/``):
   python build_opensearch_entity_query_from_csv.py ^
     --csv "...\\data.csv" ^
     --out opensearch_search.json ^
     --queries-out queries_payload.json
 
-If ``--csv`` is omitted, the newest ``*.csv`` under ``BulkUplaodFiles`` next to
-this script is used (folder name matches your path: BulkUplaodFiles).
+If ``--csv`` is omitted, the newest ``*.csv`` under ``input/build_opensearch_query/`` next to
+this script is used.
 
 Distinct count only (no JSON written)::
 
@@ -70,11 +70,11 @@ from typing import Sequence
 
 from dotenv import load_dotenv
 
-from project_paths import resolve_cli_artifact
+from project_paths import input_dir, resolve_cli_artifact
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
 
-DEFAULT_BULK_DIR = Path(__file__).resolve().parent / "BulkUplaodFiles"
+DEFAULT_BULK_DIR = input_dir("build_opensearch_query")
 DEFAULT_QUERIES_ENTITIES_PER_FILE = 100
 DEFAULT_OPENSEARCH_RESULT_CAP = 10_000
 OPENSEARCH_FULL_FILENAME = "opensearch_search_full.json"
@@ -287,7 +287,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--csv",
         type=Path,
         default=None,
-        help="Path to CSV. Default: newest *.csv under BulkUplaodFiles beside this script.",
+        help="Path to CSV. Default: newest *.csv under input/build_opensearch_query/ beside this script.",
     )
     p.add_argument(
         "--tenant-id",
@@ -306,7 +306,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             f"Write {OPENSEARCH_FULL_FILENAME!r} (all ids), "
             f"{OPENSEARCH_TERMS_CHUNK_BASENAME!r} chunk(s) (max ids per file = --queries-entities-per-file), "
             f"and {QUERIES_PAYLOAD_FILENAME!r} payload chunk(s). Do not combine with --out or --queries-out. "
-            "Relative paths are placed under output/opensearch_queries/ at the project root."
+            "Relative paths are placed under output/build_opensearch_query/ at the project root."
         ),
     )
     p.add_argument(
@@ -315,7 +315,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=None,
         help=(
             "Write OpenSearch _search JSON only to this path (separate from --queries-out). "
-            "Relative paths go under output/opensearch_queries/."
+            "Relative paths go under output/build_opensearch_query/."
         ),
     )
     p.add_argument(
@@ -325,7 +325,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         help=(
             'Write {"queries": [...]} payload only (max 100 entities per file; '
             "chunked as stem_1.json, …). Use with --out for two explicit files, or use --output-dir. "
-            "Relative paths go under output/opensearch_queries/."
+            "Relative paths go under output/build_opensearch_query/."
         ),
     )
     p.add_argument(
@@ -370,11 +370,11 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     if args.output_dir is not None:
-        args.output_dir = resolve_cli_artifact(args.output_dir, "opensearch_queries")
+        args.output_dir = resolve_cli_artifact(args.output_dir, "build_opensearch_query")
     if args.out is not None:
-        args.out = resolve_cli_artifact(args.out, "opensearch_queries")
+        args.out = resolve_cli_artifact(args.out, "build_opensearch_query")
     if args.queries_out is not None:
-        args.queries_out = resolve_cli_artifact(args.queries_out, "opensearch_queries")
+        args.queries_out = resolve_cli_artifact(args.queries_out, "build_opensearch_query")
 
     csv_path = args.csv.expanduser() if args.csv else pick_latest_csv(DEFAULT_BULK_DIR)
     if not csv_path.is_file():

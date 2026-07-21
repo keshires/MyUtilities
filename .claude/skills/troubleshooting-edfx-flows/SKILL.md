@@ -42,6 +42,13 @@ cd DocuProj
 # open http://127.0.0.1:8011/app/  — filter endpoints, click one for its swimlane
 ```
 
+## Domain reference — entity categorization
+Definitions and business rules for entity kinds (Public / Private / Custom /
+Public+Private Customized), the `data_type` / `custom_id` / `financials_type`
+combinations, what a NULL `financials_process_id`/`_status` means, and the
+customized-entity detection SQL: **`references/entity-categorization.md`**. Read it
+before writing any query that filters entities by kind or financials status.
+
 ## When the chain stops short
 - **Repo not cloned** — a service not in `.workspace` is invisible; clone it (right branch).
 - **Variable-URL hop missing** — gateway->service calls like `tessera_client.get(url)` only
