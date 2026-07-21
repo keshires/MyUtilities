@@ -88,13 +88,14 @@ REPORT_ALIASES: dict[str, str] = {
 
 REPORT_CHOICES = tuple(REPORT_ALIASES.keys()) + ("all",)
 
+# `all` is aggregate-only: per-source entity_source_totals, NOT per-entity triggering_entity_counts.
 ALL_REPORT_KEYS = (
     "daily_totals_source",
     "hourly_totals",
     "hourly_by_status",
     "status_summary",
     "source_update_totals",
-    "triggering_entity_counts",
+    "entity_source_totals",
     "triggering_entity_counts_by_day",
     "entities_by_day_source_status",
     "portfolios_by_day_source_status",

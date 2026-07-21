@@ -37,3 +37,27 @@ def test_pivot_specs_shape():
 def test_unknown_report_raises():
     with pytest.raises(SystemExit):
         mod.resolve_reports("does_not_exist")
+
+
+def test_all_is_exact_aggregate_set():
+    # `all` is aggregate-only: uses per-source entity_source_totals, NOT the
+    # large per-entity triggering_entity_counts, and no slow/pivot reports.
+    assert set(mod.resolve_reports("all")) == {
+        "daily_totals_source",
+        "hourly_totals",
+        "hourly_by_status",
+        "status_summary",
+        "source_update_totals",
+        "entity_source_totals",
+        "triggering_entity_counts_by_day",
+        "entities_by_day_source_status",
+        "portfolios_by_day_source_status",
+    }
+    for excluded in (
+        "triggering_entity_counts",
+        "slow_global",
+        "slow_by_source",
+        "entity_by_source",
+        "portfolio_entity_source",
+    ):
+        assert excluded not in mod.resolve_reports("all")
