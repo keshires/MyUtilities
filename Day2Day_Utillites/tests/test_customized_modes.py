@@ -7,7 +7,7 @@ def test_private_customized_mode():
     m = rf.resolve_entity_mode("private-customized")
     assert m.payload_type == "non-public-customized"
     assert m.data_type == "Private"
-    assert m.customized is True
+    assert m.signal_mode == "require"
     assert m.custom_id_clause == "custom_id IS NULL"
 
 
@@ -15,7 +15,7 @@ def test_public_customized_mode():
     m = rf.resolve_entity_mode("public-customized")
     assert m.payload_type == "public-customized"
     assert m.data_type == "Public"
-    assert m.customized is True
+    assert m.signal_mode == "require"
 
 
 def test_customized_aliases():
@@ -23,11 +23,11 @@ def test_customized_aliases():
     assert rf.resolve_entity_mode("public_customized").name == "public-customized"
 
 
-def test_existing_modes_unchanged():
+def test_mode_payloads_and_signal_modes():
     assert rf.resolve_entity_mode("custom").payload_type == "non-public-customized"
-    assert rf.resolve_entity_mode("custom").customized is False
+    assert rf.resolve_entity_mode("custom").signal_mode == "none"
     assert rf.resolve_entity_mode("private").payload_type == "non-public"
-    assert rf.resolve_entity_mode("private").customized is False
+    assert rf.resolve_entity_mode("private").signal_mode == "exclude"
 
 
 # --- customized query shape ------------------------------------------------
@@ -70,12 +70,20 @@ def test_customized_tenant_scope_uses_include_form():
     assert "e.tenant_id = $2::text" in q
 
 
-# --- regression: existing custom/private SQL must be byte-unchanged ---------
+# --- regression: custom SQL stays flat/unchanged; private is refined ---------
 
-def test_flat_modes_have_no_joins_or_cap_filter():
-    for name in ("custom", "private"):
-        m = rf.resolve_entity_mode(name)
-        q = rf.stale_entities_query(m, stale_date_column="pd_last_known_date")
-        assert "LEFT JOIN" not in q
-        assert "is_cap_entity" not in q
-        assert "FROM public.entity\n" in q  # flat, unaliased FROM
+def test_custom_mode_stays_flat_unchanged():
+    q = rf.stale_entities_query(rf.resolve_entity_mode("custom"), stale_date_column="pd_last_known_date")
+    assert "LEFT JOIN" not in q                 # no joins
+    assert "is_cap_entity" not in q             # custom left byte-identical
+    assert "FROM public.entity\n" in q          # flat, unaliased FROM
+    assert "custom_id IS NOT NULL" in q
+
+
+def test_private_mode_refined_excludes_customized():
+    q = rf.stale_entities_query(rf.resolve_entity_mode("private"), stale_date_column="pd_last_known_date")
+    assert "LEFT JOIN public.entity_custom_data" in q          # now joined
+    assert "e.custom_id IS NULL" in q
+    assert "e.is_cap_entity = false" in q
+    assert "NOT COALESCE(" in q                                # excludes the customization signal
+    assert "e.data_type = 'Private'" in q

@@ -210,10 +210,13 @@ class EntityRefreshMode:
     custom_id_clause: str
     description: str
     data_type: str = "Private"
-    # customized modes join entity_custom_data / entity_scorecard /
-    # entity_parent_group_support and require the backend customization signal
-    # (see CUSTOMIZED_SIGNAL_SQL). custom/private use the flat entity query.
-    customized: bool = False
+    # signal_mode controls the query shape:
+    #   "none"    -> flat entity query, no customization signal (custom).
+    #   "require" -> joined query, AND <signal>  (private-customized, public-customized).
+    #   "exclude" -> joined query, AND NOT <signal>  (private, refined to drop customized).
+    # "require"/"exclude" join entity_custom_data / entity_scorecard /
+    # entity_parent_group_support and add is_cap_entity = false.
+    signal_mode: str = "none"
 
 
 ENTITY_MODES: dict[str, EntityRefreshMode] = {
@@ -223,15 +226,15 @@ ENTITY_MODES: dict[str, EntityRefreshMode] = {
         custom_id_clause="custom_id IS NOT NULL",
         description="Custom entities (custom_id IS NOT NULL)",
         data_type="Private",
-        customized=False,
+        signal_mode="none",
     ),
     "private": EntityRefreshMode(
         name="private",
         payload_type="non-public",
         custom_id_clause="custom_id IS NULL",
-        description="Private entities (custom_id IS NULL)",
+        description="Private entities (custom_id IS NULL, NOT customized — excludes the customization signal)",
         data_type="Private",
-        customized=False,
+        signal_mode="exclude",
     ),
     "private-customized": EntityRefreshMode(
         name="private-customized",
@@ -239,7 +242,7 @@ ENTITY_MODES: dict[str, EntityRefreshMode] = {
         custom_id_clause="custom_id IS NULL",
         description="Private customized (data_type Private, custom_id IS NULL, customization signal)",
         data_type="Private",
-        customized=True,
+        signal_mode="require",
     ),
     "public-customized": EntityRefreshMode(
         name="public-customized",
@@ -247,7 +250,7 @@ ENTITY_MODES: dict[str, EntityRefreshMode] = {
         custom_id_clause="custom_id IS NULL",
         description="Public customized (data_type Public, custom_id IS NULL, customization signal)",
         data_type="Public",
-        customized=True,
+        signal_mode="require",
     ),
 }
 
@@ -328,6 +331,14 @@ def customized_entities_query(
     date_clause = (
         DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column, alias="e")
     )
+    # require -> AND <signal> (customized modes; NULL/false excluded, i.e. only clearly customized).
+    # exclude -> AND NOT COALESCE(<signal>, false) (refined private; NULL signal counts as
+    #   not-customized so private is the exact complement of the customized modes — no gap).
+    signal_clause = (
+        f"NOT COALESCE({CUSTOMIZED_SIGNAL_SQL}, false)"
+        if mode.signal_mode == "exclude"
+        else CUSTOMIZED_SIGNAL_SQL
+    )
     return (
         f"SELECT {select}\n"
         f"{CUSTOMIZED_JOINS}\n"
@@ -335,7 +346,7 @@ def customized_entities_query(
         f"  AND e.custom_id IS NULL\n"
         f"  AND e.external_id IS NOT NULL\n"
         f"  AND e.is_cap_entity = false\n"
-        f"  AND {CUSTOMIZED_SIGNAL_SQL}\n"
+        f"  AND {signal_clause}\n"
         f"  AND {tenant_clause(tenant_id=tenant_id, include_all=include_all, alias='e')}\n"
         f"  {financial_stmt_clause(financial_max_age_years, alias='e')}\n"
         f"  {date_clause}\n"
@@ -351,7 +362,7 @@ def stale_entities_query(
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
     financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
-    if mode.customized:
+    if mode.signal_mode != "none":
         return customized_entities_query(
             mode,
             select="DISTINCT e.external_id",
@@ -377,7 +388,7 @@ def stale_entities_count_query(
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
     financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
-    if mode.customized:
+    if mode.signal_mode != "none":
         return customized_entities_query(
             mode,
             select="COUNT(DISTINCT e.external_id)",
@@ -404,7 +415,7 @@ def tenants_query(
 ) -> str:
     """Distinct non-excluded tenants with matching stale entities. Always uses
     the exclude form of the tenant clause (tenant_id param is the excluded list)."""
-    if mode.customized:
+    if mode.signal_mode != "none":
         return customized_entities_query(
             mode,
             select="DISTINCT e.tenant_id",
