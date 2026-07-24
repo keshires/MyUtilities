@@ -24,6 +24,10 @@ Tools live in `Day2Day_Utillites/`. Run everything from that folder with its ven
   fanned out into one PD request per group, then merged — instead of raising) — **deployed to prod
   2026-07-24**. The service also re-chunks internally (5 public / 10 private / 100 custom-financials
   per SQS message), so a larger client `--batch-size` (default 15000) just means fewer HTTP posts.
+  **Keep `--workers` LOW when batching** (~3, with `--batch-size` ~100): ~20 workers × 100-entity
+  payloads overwhelmed the API gateway with sustained **HTTP 502** on 2026-07-24, while 3 concurrent
+  was clean. (Batch-size-1 tolerates ~20 workers because those payloads are tiny.) So: batch → few
+  workers; one-per-request → many workers.
   `refreshEntities` still **enqueues asynchronously** — a 200 means "Submitted", NOT that the PD
   moved; the SQS consumer recomputes downstream. **Re-validate only after the refresh queue drains**,
   not just when Postgres looks settled (low mid-processing yield is expected, not failure). Iterate on
