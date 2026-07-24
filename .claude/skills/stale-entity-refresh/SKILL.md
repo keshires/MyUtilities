@@ -17,14 +17,17 @@ Tools live in `Day2Day_Utillites/`. Run everything from that folder with its ven
   look caught up when it isn't. `pd_last_known_date` is the true signal.
 - **Exclude the deprecated giant** by setting `STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB`
   in `.env`. This also *includes* `0014000000NXtS8` (the script's built-in default excludes it).
-- **One entity per request + iterate (temporary).** `--one-per-request` is a **workaround** for a
-  batch bug fixed in [edfx-tessera-service PR #2541](https://github.com/moodysanalytics/edfx-tessera-service/pull/2541),
-  **not yet in prod**. Once it ships, switch back: drop `--one-per-request`, use `--batch-size` ~10
-  (private) / ~100 (custom). `refreshEntities` also **enqueues asynchronously** — a 200 means
-  "Submitted", NOT that the PD moved; the SQS consumer recomputes downstream. **Re-validate only
-  after the refresh queue drains**, not just when Postgres looks settled (low mid-processing yield is
-  expected, not failure). Iterate on the residual until it plateaus. (Verified from source — see
-  memory `edfx-refresh-mechanics`.)
+- **Batch posting is the default — do NOT use `--one-per-request` unless explicitly asked.** The
+  "Multiple Overlay Process Ids found" failure on large mixed-overlay batches was fixed by
+  [edfx-tessera-service PR #2564 / EDFX-28971](https://github.com/moodysanalytics/edfx-tessera-service/pull/2564)
+  (each batch is grouped by its `(qualitative-overlay, parent-group-support)` process-id pair and
+  fanned out into one PD request per group, then merged — instead of raising) — **deployed to prod
+  2026-07-24**. The service also re-chunks internally (5 public / 10 private / 100 custom-financials
+  per SQS message), so a larger client `--batch-size` (default 15000) just means fewer HTTP posts.
+  `refreshEntities` still **enqueues asynchronously** — a 200 means "Submitted", NOT that the PD
+  moved; the SQS consumer recomputes downstream. **Re-validate only after the refresh queue drains**,
+  not just when Postgres looks settled (low mid-processing yield is expected, not failure). Iterate on
+  the residual until it plateaus. (Verified from source — see memory `edfx-refresh-mechanics`.)
 
 ## Monthly run (custom + private, by PD date)
 
@@ -35,10 +38,10 @@ auto-targets `2026-08-01`; override with `--date-filter YYYY-MM-01`).
    `python validate_stale_entities.py --entity-type custom --stale-date-column pd_last_known_date`
    (repeat with `--entity-type private`; one tenant only: add `--tenant-id <id>`).
 2. **Dry-run** (no posting, confirm count):
-   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --dry-run`
-3. **Live refresh** (posts to prod queue):
-   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --workers 20`
-   (repeat with `--entity-type private`).
+   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --dry-run`
+3. **Live refresh** (posts to prod queue, batched):
+   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --workers 20`
+   (repeat with `--entity-type private`; add `--one-per-request` only if explicitly instructed — see the batch note above).
 4. **Re-validate after the queue settles** (repeat step 1); re-run step 3 on any residual until it plateaus.
 5. **Spot-verify (optional):** `python test_single_entity_refresh.py --entity-type custom --count 10`
    — submits a few individually and polls until `pd_last_known_date` advances.
