@@ -149,34 +149,38 @@ DATE_CLAUSE_ALL = ""
 DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS = 3
 
 
-def stale_date_clause(column: str) -> str:
+def stale_date_clause(column: str, alias: str = "") -> str:
     """Build the stale-date WHERE clause for the chosen column.
 
     ``column`` must come from :data:`STALE_DATE_COLUMNS`; it is validated by
     :func:`resolve_stale_date_column` before it reaches here, so interpolating
-    it into the SQL is safe.
+    it into the SQL is safe. ``alias`` optionally qualifies the column (e.g.
+    ``e``) for the joined customized query.
     """
+    col = f"{alias}.{column}" if alias else column
     return (
         f"AND (\n"
-        f"        {column} IS NULL\n"
-        f"        OR {column} < $1::timestamp\n"
+        f"        {col} IS NULL\n"
+        f"        OR {col} < $1::timestamp\n"
         f"      )"
     )
 
 
-def financial_stmt_clause(max_age_years: int) -> str:
+def financial_stmt_clause(max_age_years: int, alias: str = "") -> str:
     """Restrict to entities whose financialStmtDate is missing or within
     ``max_age_years`` of now. ``max_age_years <= 0`` disables the filter.
 
     ``max_age_years`` is an int (validated by argparse), so formatting it into
-    the SQL interval literal is safe.
+    the SQL interval literal is safe. ``alias`` optionally qualifies
+    ``entity_data`` (e.g. ``e``) for the joined customized query.
     """
     if max_age_years <= 0:
         return ""
+    col = f"{alias}.entity_data" if alias else "entity_data"
     return (
         "AND (\n"
-        "        NULLIF(entity_data ->> 'financialStmtDate', '') IS NULL\n"
-        "        OR NULLIF(entity_data ->> 'financialStmtDate', '')::timestamp"
+        f"        NULLIF({col} ->> 'financialStmtDate', '') IS NULL\n"
+        f"        OR NULLIF({col} ->> 'financialStmtDate', '')::timestamp"
         f" >= (NOW() - INTERVAL '{max_age_years} years')\n"
         "      )"
     )
@@ -205,6 +209,14 @@ class EntityRefreshMode:
     payload_type: str
     custom_id_clause: str
     description: str
+    data_type: str = "Private"
+    # signal_mode controls the query shape:
+    #   "none"    -> flat entity query, no customization signal (custom).
+    #   "require" -> joined query, AND <signal>  (private-customized, public-customized).
+    #   "exclude" -> joined query, AND NOT <signal>  (private, refined to drop customized).
+    # "require"/"exclude" join entity_custom_data / entity_scorecard /
+    # entity_parent_group_support and add is_cap_entity = false.
+    signal_mode: str = "none"
 
 
 ENTITY_MODES: dict[str, EntityRefreshMode] = {
@@ -213,19 +225,46 @@ ENTITY_MODES: dict[str, EntityRefreshMode] = {
         payload_type="non-public-customized",
         custom_id_clause="custom_id IS NOT NULL",
         description="Custom entities (custom_id IS NOT NULL)",
+        data_type="Private",
+        signal_mode="none",
     ),
     "private": EntityRefreshMode(
         name="private",
         payload_type="non-public",
         custom_id_clause="custom_id IS NULL",
-        description="Private entities (custom_id IS NULL)",
+        description="Private entities (custom_id IS NULL, NOT customized — excludes the customization signal)",
+        data_type="Private",
+        signal_mode="exclude",
+    ),
+    "private-customized": EntityRefreshMode(
+        name="private-customized",
+        payload_type="non-public-customized",
+        custom_id_clause="custom_id IS NULL",
+        description="Private customized (data_type Private, custom_id IS NULL, customization signal)",
+        data_type="Private",
+        signal_mode="require",
+    ),
+    "public-customized": EntityRefreshMode(
+        name="public-customized",
+        payload_type="public-customized",
+        custom_id_clause="custom_id IS NULL",
+        description="Public customized (data_type Public, custom_id IS NULL, customization signal)",
+        data_type="Public",
+        signal_mode="require",
     ),
 }
 
 
 def resolve_entity_mode(raw: str) -> EntityRefreshMode:
     key = (raw or "").strip().lower()
-    aliases = {"customized": "custom", "customised": "custom"}
+    aliases = {
+        "customized": "custom",
+        "customised": "custom",
+        "private_customized": "private-customized",
+        "privatecustomized": "private-customized",
+        "public_customized": "public-customized",
+        "publiccustomized": "public-customized",
+    }
     key = aliases.get(key, key)
     if key not in ENTITY_MODES:
         valid = ", ".join(sorted(ENTITY_MODES))
@@ -233,10 +272,86 @@ def resolve_entity_mode(raw: str) -> EntityRefreshMode:
     return ENTITY_MODES[key]
 
 
-def tenant_clause(*, tenant_id: str | None, include_all: bool = False) -> str:
+def tenant_clause(
+    *, tenant_id: str | None, include_all: bool = False, alias: str = ""
+) -> str:
+    """Tenant WHERE fragment. Param position: ``$1`` when ``include_all`` (no
+    date param), else ``$2``. ``alias`` optionally qualifies ``tenant_id``.
+
+    With ``alias=''`` this reproduces the TENANT_CLAUSE_* constants exactly.
+    """
+    col = f"{alias}.tenant_id" if alias else "tenant_id"
+    param = "$1" if include_all else "$2"
     if tenant_id:
-        return TENANT_CLAUSE_INCLUDE_ALL if include_all else TENANT_CLAUSE_INCLUDE
-    return TENANT_CLAUSE_EXCLUDE_ALL if include_all else TENANT_CLAUSE_EXCLUDE
+        return f"{col} = {param}::text"
+    return f"{col} <> ALL({param}::text[])"
+
+
+# ---------------------------------------------------------------------------
+# Customized modes (private-customized / public-customized)
+#
+# The backend (edfx-tessera-service EntityRefreshRepository.get_entities_
+# w_customizations) classifies an entity as customized by signals in
+# entity_custom_data / entity_scorecard / entity_parent_group_support — NOT by
+# custom_id. We mirror that signal but keep custom_id IS NULL so these modes
+# stay disjoint from the existing `custom` (custom_id IS NOT NULL) mode.
+# ---------------------------------------------------------------------------
+CUSTOMIZED_JOINS = (
+    "FROM public.entity e\n"
+    "LEFT JOIN public.entity_custom_data ecd ON ecd.entity_id = e.id\n"
+    "LEFT JOIN public.entity_scorecard es ON es.entity_id = e.id\n"
+    "LEFT JOIN public.entity_parent_group_support epgs ON epgs.entity_id = e.id"
+)
+
+CUSTOMIZED_SIGNAL_SQL = (
+    "(\n"
+    "        (es.entity_id IS NOT NULL AND es.apply_pd = true)\n"
+    "     OR (COALESCE(ecd.financials_type, 'moodys') <> 'moodys')\n"
+    "     OR (ecd.country IS NOT NULL OR ecd.state IS NOT NULL OR ecd.industry IS NOT NULL\n"
+    "         OR ecd.peer_group_id IS NOT NULL OR ecd.target_cdt IS NOT NULL)\n"
+    "     OR (epgs.entity_id IS NOT NULL AND epgs.apply_pd = true)\n"
+    "      )"
+)
+
+
+def customized_entities_query(
+    mode: EntityRefreshMode,
+    *,
+    select: str,
+    order: str,
+    tenant_id: str | None,
+    include_all: bool,
+    stale_date_column: str,
+    financial_max_age_years: int,
+) -> str:
+    """Joined + signal-filtered query for customized modes. ``mode.data_type``
+    ('Private'/'Public') comes from the validated ENTITY_MODES table, so
+    interpolation is safe. Params: ``$1`` = stale cutoff, ``$2`` = tenant/excluded.
+    """
+    date_clause = (
+        DATE_CLAUSE_ALL if include_all else stale_date_clause(stale_date_column, alias="e")
+    )
+    # require -> AND <signal> (customized modes; NULL/false excluded, i.e. only clearly customized).
+    # exclude -> AND NOT COALESCE(<signal>, false) (refined private; NULL signal counts as
+    #   not-customized so private is the exact complement of the customized modes — no gap).
+    signal_clause = (
+        f"NOT COALESCE({CUSTOMIZED_SIGNAL_SQL}, false)"
+        if mode.signal_mode == "exclude"
+        else CUSTOMIZED_SIGNAL_SQL
+    )
+    return (
+        f"SELECT {select}\n"
+        f"{CUSTOMIZED_JOINS}\n"
+        f"WHERE e.data_type = '{mode.data_type}'\n"
+        f"  AND e.custom_id IS NULL\n"
+        f"  AND e.external_id IS NOT NULL\n"
+        f"  AND e.is_cap_entity = false\n"
+        f"  AND {signal_clause}\n"
+        f"  AND {tenant_clause(tenant_id=tenant_id, include_all=include_all, alias='e')}\n"
+        f"  {financial_stmt_clause(financial_max_age_years, alias='e')}\n"
+        f"  {date_clause}\n"
+        f"{order}"
+    )
 
 
 def stale_entities_query(
@@ -247,6 +362,16 @@ def stale_entities_query(
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
     financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
+    if mode.signal_mode != "none":
+        return customized_entities_query(
+            mode,
+            select="DISTINCT e.external_id",
+            order="ORDER BY e.external_id",
+            tenant_id=tenant_id,
+            include_all=include_all,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+        )
     return STALE_ENTITIES_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
@@ -263,6 +388,16 @@ def stale_entities_count_query(
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
     financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
+    if mode.signal_mode != "none":
+        return customized_entities_query(
+            mode,
+            select="COUNT(DISTINCT e.external_id)",
+            order="",
+            tenant_id=tenant_id,
+            include_all=include_all,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+        )
     return STALE_ENTITIES_COUNT_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=tenant_id, include_all=include_all),
@@ -280,6 +415,16 @@ def tenants_query(
 ) -> str:
     """Distinct non-excluded tenants with matching stale entities. Always uses
     the exclude form of the tenant clause (tenant_id param is the excluded list)."""
+    if mode.signal_mode != "none":
+        return customized_entities_query(
+            mode,
+            select="DISTINCT e.tenant_id",
+            order="ORDER BY e.tenant_id",
+            tenant_id=None,
+            include_all=include_all,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+        )
     return TENANTS_QUERY_BASE.format(
         custom_id_clause=mode.custom_id_clause,
         tenant_clause=tenant_clause(tenant_id=None, include_all=include_all),
@@ -1195,7 +1340,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         "--entity-type",
         default=None,
         help=(
-            "Entity mode: 'custom' (non-public-customized) or 'private' (non-public). "
+            "Entity mode: 'custom' (custom_id NOT NULL -> non-public-customized), "
+            "'private' (custom_id NULL -> non-public), "
+            "'private-customized' (custom_id NULL + customization signal -> non-public-customized), "
+            "'public-customized' (Public + custom_id NULL + signal -> public-customized). "
             "Aliases: customized. Default: STALE_REFRESH_ENTITY_TYPE or 'private'."
         ),
     )

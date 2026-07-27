@@ -34,6 +34,8 @@ if sys.platform == "win32":
 DEFAULT_EXCLUDED = ("001aJ00000Cwqc2QAB",)
 PDS_BATCH = 200
 END_DATE = None  # set per-run to first-of-next-day (today); see main()
+CUSTOMIZED_TYPES = ("private-customized", "public-customized")
+POSTABLE_TYPES = set(pc.POSTABLE_TYPES) | set(CUSTOMIZED_TYPES)
 
 
 def summarize(classified: list[tuple[pc.StaleRow, pc.Classification]], entity_type: str) -> dict:
@@ -44,7 +46,7 @@ def summarize(classified: list[tuple[pc.StaleRow, pc.Classification]], entity_ty
     return {
         "entity_type": entity_type,
         "stale_found": len(classified),
-        "expected_to_refresh": post if entity_type in pc.POSTABLE_TYPES else 0,
+        "expected_to_refresh": post if entity_type in POSTABLE_TYPES else 0,
         "post": post,
         "skip": skip,
         "orphaned": cats.get("orphaned", 0),
@@ -73,6 +75,32 @@ async def _fetch_rows(entity_type: str, ref: date, excluded: list[str], limit: i
     lim = f"LIMIT {int(limit)}" if limit else ""
     conn = await _pg()
     try:
+        if entity_type in CUSTOMIZED_TYPES:
+            # Reuse the refresh script's joined + signal query for exact parity; pick the
+            # custom-financials ecd row per entity so the composite pds id is available.
+            mode = rf.resolve_entity_mode(entity_type)
+            sel = ("DISTINCT ON (e.external_id) e.external_id, e.tenant_id, e.pd_last_known_date, "
+                   "ecd.financials_type, ecd.financials_process_id, ecd.financials_process_status")
+            q = rf.customized_entities_query(
+                mode, select=sel,
+                order=("ORDER BY e.external_id, (ecd.financials_type='custom') DESC NULLS LAST, "
+                       "ecd.financials_process_id DESC NULLS LAST"),
+                tenant_id=None, include_all=False,
+                stale_date_column="pd_last_known_date", financial_max_age_years=0)
+            if lim:
+                q = f"{q}\n{lim}"
+            rows = await conn.fetch(q, cutoff, excluded)
+            stale = [
+                pc.StaleRow(
+                    str(r["external_id"]), str(r["tenant_id"]), r["pd_last_known_date"], None, False,
+                    financials_process_id=(str(r["financials_process_id"])
+                                           if r["financials_type"] == "custom" and r["financials_process_id"]
+                                           else None),
+                )
+                for r in rows
+            ]
+            meta = {str(r["external_id"]): r["financials_process_status"] for r in rows}
+            return stale, meta
         if entity_type == "custom":
             q = f"""SELECT DISTINCT ON (e.external_id) e.external_id, e.tenant_id, e.custom_id,
                        e.pd_last_known_date, ecd.financials_process_id, ecd.financials_process_status
@@ -162,7 +190,8 @@ def _http(logger):
 def main(argv: list[str] | None = None) -> int:
     global END_DATE
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--entity-type", required=True, choices=["custom", "private", "public"])
+    ap.add_argument("--entity-type", required=True,
+                    choices=["custom", "private", "public", "private-customized", "public-customized"])
     ap.add_argument("--date-filter", default=None, help="Stale cutoff YYYY-MM-DD (default 1st of month).")
     ap.add_argument("--limit", type=int, default=None, help="Cap entities (testing).")
     args = ap.parse_args(argv)
@@ -182,6 +211,20 @@ def main(argv: list[str] | None = None) -> int:
     if et == "public":
         classified = [(r, pc.classify_public(r.pd_last_known_date, meta.get(r.external_id), ref))
                       for r in rows]
+    elif et in CUSTOMIZED_TYPES:
+        # Mixed set: custom-financials rows carry a financials_process_id and are queried
+        # via the composite pds id (classify as 'custom'); the rest use external_id
+        # (classify as 'private'-like). public-customized non-custom-fin rows are treated
+        # as private-like for the pds check (approximate — public PDs are vendor-driven).
+        pds_post, mapping_lookup = _http(logger)
+        resolver = pc.PdMappingResolver(pds_post, mapping_lookup, batch_size=PDS_BATCH)
+        classified = []
+        for grp, sub_et in (([r for r in rows if r.financials_process_id], "custom"),
+                            ([r for r in rows if not r.financials_process_id], "private")):
+            if not grp:
+                continue
+            statuses = resolver.resolve(grp, sub_et)
+            classified += [(r, pc.classify_status(sub_et, statuses.get(r.external_id), ref)) for r in grp]
     else:
         pds_post, mapping_lookup = _http(logger)
         resolver = pc.PdMappingResolver(pds_post, mapping_lookup, batch_size=PDS_BATCH)
@@ -208,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
                     "category", "action", "reason"])
         ow.writerow(["external_id", "tenant_id", "pd_last_known_date", "reason"])
         for r, c in classified:
-            fin = meta.get(r.external_id) if et == "custom" else ""
+            fin = meta.get(r.external_id) if (et == "custom" or et in CUSTOMIZED_TYPES) else ""
             w.writerow([r.external_id, r.tenant_id, r.pd_last_known_date, fin, c.category, c.action, c.reason])
             if c.category == "orphaned":
                 ow.writerow([r.external_id, r.tenant_id, r.pd_last_known_date, c.reason])

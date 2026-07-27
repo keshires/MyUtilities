@@ -42,6 +42,7 @@ from pathlib import Path
 import asyncpg
 from dotenv import load_dotenv
 
+import refresh_stale_non_public_entities as rf
 from project_paths import logs_dir, output_dir, resolve_cli_artifact
 
 load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
@@ -149,13 +150,10 @@ def _env(name: str, default: str = "") -> str:
 
 
 def resolve_entity_type(raw: str | None) -> str:
-    key = (raw or _env("STALE_REFRESH_ENTITY_TYPE", "private")).strip().lower()
-    aliases = {"customized": "custom", "customised": "custom"}
-    key = aliases.get(key, key)
-    if key not in CUSTOM_ID_CLAUSE:
-        valid = ", ".join(sorted(CUSTOM_ID_CLAUSE))
-        raise SystemExit(f"Invalid --entity-type {raw!r}. Choose one of: {valid}")
-    return key
+    """Resolve to a refresh-script mode name (custom / private / private-customized /
+    public-customized), so this validator stays 1:1 with the refresh definitions."""
+    key = (raw or _env("STALE_REFRESH_ENTITY_TYPE", "private")).strip()
+    return rf.resolve_entity_mode(key).name
 
 
 def excluded_tenant_ids() -> list[str]:
@@ -210,8 +208,29 @@ def build_query(
     stale_date_column: str = DEFAULT_STALE_DATE_COLUMN,
     financial_max_age_years: int = DEFAULT_FINANCIAL_STMT_MAX_AGE_YEARS,
 ) -> str:
-    """Same WHERE clause as the refresh script's stale query, per-row detail."""
-    custom_clause = CUSTOM_ID_CLAUSE[entity_type]
+    """Same WHERE clause as the refresh script's stale query, per-row detail.
+
+    custom -> flat query (custom_id IS NOT NULL). private / private-customized /
+    public-customized -> the refresh script's joined + signal query (reused verbatim
+    for exact parity), with the reconcile detail columns.
+    """
+    mode = rf.resolve_entity_mode(entity_type)
+    if mode.signal_mode != "none":
+        detail_select = (
+            "DISTINCT ON (e.external_id) e.external_id, e.name, e.tenant_id, e.custom_id, "
+            "e.updated_date, e.pd_last_known_date, e.as_of_date, e.entity_data"
+        )
+        return rf.customized_entities_query(
+            mode,
+            select=detail_select,
+            order="ORDER BY e.external_id",
+            tenant_id=tenant_id,
+            include_all=include_all,
+            stale_date_column=stale_date_column,
+            financial_max_age_years=financial_max_age_years,
+        )
+
+    custom_clause = mode.custom_id_clause
     if include_all:
         tenant_ph = "$1"
         date_clause = ""
