@@ -87,9 +87,31 @@ Needs SSO env (private/custom). Add `--limit N` to sample. Read-only — never p
 ```
 Repeat steps 2–3 with `--entity-type private`.
 
+### 3b. Check entity_refresh_status for downstream failures and resubmit
+
+After posting the live refresh, check the `entity_refresh_status` table for entities that
+failed during downstream processing (the SQS consumer, not the HTTP submission itself).
+These failures are independent of the stale-date filter — an entity may have received a 200
+from `refreshEntities` but still failed inside `EntityRefreshService`.
+
+```powershell
+# Report only — see what failed since the start of the month
+.\.venv\Scripts\python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01
+
+# Resubmit failures (dry-run first)
+.\.venv\Scripts\python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --dry-run
+
+# Resubmit failures (live)
+.\.venv\Scripts\python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --workers 3
+```
+
+Tip: use `--since` matching the current month's 1st (same date as `--date-filter` in the refresh
+run). Use `--correlation-id <id>` to scope to a specific batch from the refresh log.
+The CSV output shows `entity_type_resolved` (custom/private/not_found) and the action taken.
+
 ### 4. Re-validate & iterate
 After the queue settles (allow time — async), re-run step 1. If a residual remains, re-run step 3
-on it. Repeat until the count plateaus.
+and step 3b on it. Repeat until the count plateaus.
 
 ### 5. Spot-verify (optional)
 ```

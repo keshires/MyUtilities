@@ -46,7 +46,18 @@ auto-targets `2026-08-01`; override with `--date-filter YYYY-MM-01`).
 3. **Live refresh** (posts to prod queue, batched):
    `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --workers 20`
    (repeat with `--entity-type private`; add `--one-per-request` only if explicitly instructed — see the batch note above).
-4. **Re-validate after the queue settles** (repeat step 1); re-run step 3 on any residual until it plateaus.
+3b. **Check entity_refresh_status for downstream failures** — entities that received a 200 from
+   `refreshEntities` but failed inside the SQS consumer (`EntityRefreshService`) need to be
+   resubmitted. This is independent of the stale-date check:
+   ```
+   python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01
+   python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --dry-run
+   python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --workers 3
+   ```
+   Resolves `custom_id` via JOIN with `public.entity` to pick the right `payload_type`. Entities not
+   found in `public.entity` are logged as `not_found` and skipped. Add `--correlation-id <id>` to
+   scope to a specific batch. Read-only without `--resubmit`.
+4. **Re-validate after the queue settles** (repeat step 1); re-run steps 3 + 3b on any residual until it plateaus.
 5. **Spot-verify (optional):** `python test_single_entity_refresh.py --entity-type custom --count 10`
    — submits a few individually and polls until `pd_last_known_date` advances.
 

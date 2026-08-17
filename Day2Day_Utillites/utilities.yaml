@@ -126,6 +126,55 @@ utilities:
     docs: ["docs/superpowers/specs/2026-07-02-selectable-staleness-date-column-design.md"]
     safety: "Writes to prod via Tessera refreshEntities. ALWAYS run --dry-run first."
 
+  - id: monitor-entity-refresh-status
+    name: Monitor Entity Refresh Status
+    script: monitor_entity_refresh_status.py
+    category: stale-entity-refresh
+    purpose: "Query entity_refresh_status for downstream processing failures and optionally resubmit those entities to refreshEntities."
+    invocation: cli
+    args:
+      - flag: --source
+        default: "Scoring"
+        help: "Comma-separated source(s) to filter on (e.g. Scoring,Pipeline)."
+      - flag: --status
+        default: "failed"
+        help: "Comma-separated status value(s) to filter on."
+      - flag: --correlation-id
+        help: "Filter by file_correlation_id (optional)."
+      - flag: --since
+        help: "Include records with created_at >= YYYY-MM-DD. Recommended — scopes to the partition."
+      - flag: --resubmit
+        type: bool
+        help: "Post matched entities to refreshEntities. Default: report only."
+      - flag: --dry-run
+        type: bool
+        help: "With --resubmit: log without calling the API."
+      - flag: --workers
+        type: int
+        default: 3
+        help: "Parallel workers when resubmitting (default: 3)."
+      - flag: --batch-size
+        type: int
+        default: 500
+        help: "Entities per refreshEntities call when resubmitting (default: 500)."
+      - flag: --max-retries
+        type: int
+        default: 4
+        help: "Retry attempts per batch on transient errors (default: 4)."
+      - flag: --limit
+        type: int
+        help: "Cap matched entities for testing."
+      - flag: --output
+        help: "CSV path. Default output/monitor_entity_refresh_status/ers_<utc>.csv."
+    env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
+    env_optional: [MOODYS_SSO_USERNAME, MOODYS_SSO_PASSWORD, TESSERA_BASE_URL]
+    outputs:
+      output_glob: "monitor_entity_refresh_status/ers_*"
+      logs_glob: "monitor_entity_refresh_status/monitor_entity_refresh_status_*"
+      summary_suffix: ".summary.json"
+    docs: []
+    safety: "Read-only without --resubmit. With --resubmit, posts to prod Tessera refreshEntities. ALWAYS run --dry-run first."
+
   - id: test-single-entity-refresh
     name: Verify Single Entity Refresh
     script: test_single_entity_refresh.py
