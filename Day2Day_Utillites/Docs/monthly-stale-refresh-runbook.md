@@ -13,11 +13,12 @@ current month**, so running them in August automatically targets `2026-08-01`.
 - **Exclude the deprecated giant `001aJ00000Cwqc2QAB`** (unsupported, cleanup pending). Setting
   `STALE_REFRESH_EXCLUDED_TENANTS` to it also means tenant `0014000000NXtS8` is *included*
   (the script's built-in default would otherwise exclude NXtS8).
-- **One entity per request (temporary) + iterate.** `--one-per-request` is a **workaround** for a
-  batch-payload bug fixed in [edfx-tessera-service PR #2541](https://github.com/moodysanalytics/edfx-tessera-service/pull/2541)
-  but **not yet in prod**. **Once #2541 is in prod, switch back to batching:** drop `--one-per-request`
-  and set `--batch-size` to the service's own chunk size (**~10 private / ~100 custom**, or a safe
-  ~50). Batching is ~10–100× fewer HTTP calls.
+- **Batch posting is the default — do NOT use `--one-per-request`.** The "Multiple Overlay Process
+  Ids" bug that previously required one-per-request was fixed by PR #2564 / EDFX-28971 and deployed
+  2026-07-24. Batching is ~100× fewer HTTP calls (197k → ~2k requests for a 200k custom run).
+- **Keep `--workers 3` when batching.** `--workers 20` with batched payloads caused sustained HTTP
+  502 gateway errors on 2026-07-24. Low workers + batching is the safe shape. (`--one-per-request`
+  tolerates 20 workers because payloads are tiny — but don't use it; it's ~10 hrs vs ~6 min.)
 
 ## How `refreshEntities` actually works (verified from edfx-tessera-service source)
 
@@ -29,7 +30,7 @@ current month**, so running them in August automatically targets `2026-08-01`.
   settled." Low yield seen minutes/hours after posting is usually the async consumer still working
   (or entities that genuinely can't advance), not failed posts.
 - The service internally chunks at **5 public / 10 private / 100 custom-financials** per message —
-  which is why moderate `--batch-size` (not 1, not 15k) is the right shape once #2541 lands.
+  so a large client `--batch-size` (default 15k) just means fewer HTTP posts with the same downstream throughput.
 - `force: true` (which the script sends) bypasses the service's staleness threshold and refreshes
   the named entities regardless of recency.
 
@@ -78,18 +79,40 @@ Needs SSO env (private/custom). Add `--limit N` to sample. Read-only — never p
 
 ### 2. Dry-run the refresh (no posting; confirms the count)
 ```
-.\.venv\Scripts\python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --dry-run
+.\.venv\Scripts\python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --dry-run
 ```
 
-### 3. Live refresh (posts to queue), one entity per request
+### 3. Live refresh (posts to queue, batched)
 ```
-.\.venv\Scripts\python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --workers 20
+.\.venv\Scripts\python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --workers 3
 ```
 Repeat steps 2–3 with `--entity-type private`.
 
+### 3b. Check entity_refresh_status for downstream failures and resubmit
+
+After posting the live refresh, check the `entity_refresh_status` table for entities that
+failed during downstream processing (the SQS consumer, not the HTTP submission itself).
+These failures are independent of the stale-date filter — an entity may have received a 200
+from `refreshEntities` but still failed inside `EntityRefreshService`.
+
+```powershell
+# Report only — see what failed since the start of the month
+.\.venv\Scripts\python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01
+
+# Resubmit failures (dry-run first)
+.\.venv\Scripts\python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --dry-run
+
+# Resubmit failures (live)
+.\.venv\Scripts\python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --workers 3
+```
+
+Tip: use `--since` matching the current month's 1st (same date as `--date-filter` in the refresh
+run). Use `--correlation-id <id>` to scope to a specific batch from the refresh log.
+The CSV output shows `entity_type_resolved` (custom/private/not_found) and the action taken.
+
 ### 4. Re-validate & iterate
 After the queue settles (allow time — async), re-run step 1. If a residual remains, re-run step 3
-on it. Repeat until the count plateaus.
+and step 3b on it. Repeat until the count plateaus.
 
 ### 5. Spot-verify (optional)
 ```

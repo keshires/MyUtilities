@@ -46,8 +46,7 @@
       "PowerShell(Get-ChildItem .claude/skills -Directory | ForEach-Object { $f = Join-Path $_.FullName 'SKILL.md'; if \\(Test-Path $f\\) { \"$\\($_.Name\\): \" + \\(\\(Get-Content $f -TotalCount 3\\) -join ' | '\\) } })",
       "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type private --tenant-id 0014000000NXtS8 --dry-run)",
       "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --tenant-id 0014000000NXtS8 --dry-run)",
-      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --tenant-id 0014000000NXtS8 --one-per-request > logs/live_custom_run.out 2>&1)",
-      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --tenant-id 0014000000NXtS8 --one-per-request --workers 20 > logs/live_custom_run.out 2>&1)",
+      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --tenant-id 0014000000NXtS8 --workers 3 > logs/live_custom_run.out 2>&1)",
       "Bash(printf '\\\\n')",
       "Bash(python -m uvicorn Day2Day_Utillites.dashboard.serve:app --port 8021)",
       "Bash(echo \"started pid $!\")",
@@ -75,12 +74,14 @@
       "Edit(/.claude/skills/stale-entity-refresh/**)",
       "Edit(/.claude/skills/portfolio-kpi-ops/**)",
       "Bash(./.venv/Scripts/python.exe validate_stale_entities.py --entity-type custom --tenant-id 0014000000NXtS8)",
-      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --tenant-id 0014000000NXtS8 --one-per-request --workers 20)",
+      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=__none__ ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --tenant-id 0014000000NXtS8 --workers 3)",
       "Read(//c/Github/Day2Day_Utillites/**)",
       "Bash(git mv *)",
-      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --one-per-request --workers 20)",
-      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --one-per-request --workers 20)",
-      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB ./.venv/Scripts/python.exe validate_stale_entities.py --entity-type custom --stale-date-column pd_last_known_date)"
+      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB ./.venv/Scripts/python.exe refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --workers 3)",
+      "Bash(STALE_REFRESH_EXCLUDED_TENANTS=001aJ00000Cwqc2QAB ./.venv/Scripts/python.exe validate_stale_entities.py --entity-type custom --stale-date-column pd_last_known_date)",
+      "Bash(python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --dry-run --limit 10)",
+      "Bash(.venv/Scripts/python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --dry-run --limit 10)",
+      "Bash(.venv/Scripts/python monitor_entity_refresh_status.py --source Scoring --since 2026-08-01 --resubmit --limit 1 --workers 1)"
     ],
     "additionalDirectories": [
       "C:\\Users\\keshires\\AppData\\Local\\Temp\\1\\claude\\c--Github-MyUtilities\\c5962c6d-04a5-4b1a-ba1f-bdab50632ceb\\tasks",
