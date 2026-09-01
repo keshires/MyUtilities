@@ -113,7 +113,7 @@ utilities:
         help: "Refresh tenant-by-tenant: discover every tenant with stale entities (minus excluded) and process each separately. Mutually exclusive with --tenant-id; incompatible with --resume-from-batch."
       - flag: --one-per-request
         type: bool
-        help: "Submit exactly one external_id per refreshEntities call (batch size 1). Slower, but avoids large-payload failures."
+        help: "Submit exactly one external_id per refreshEntities call (batch size 1). NOT recommended for normal runs — ~100x more HTTP calls (~10 hrs vs ~6 min for 200k entities). The batch-payload bug that originally required this was fixed in PR #2564 (prod 2026-07-24). Use only if explicitly instructed."
       - flag: --tenant-checkpoint
         help: "Per-tenant checkpoint file (use with --per-tenant). Tenants already listed are skipped; each tenant is appended as it completes."
       - flag: --all-entities

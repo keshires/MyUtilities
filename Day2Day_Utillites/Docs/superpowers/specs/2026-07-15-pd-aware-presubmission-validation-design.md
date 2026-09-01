@@ -187,9 +187,9 @@ classifier remain in `pd_precheck.py` as reusable, tested code.
   this design: re-validation must run **after the refresh queue drains**, not just when Postgres
   looks settled; mid-processing low yield is expected.
 - `refreshEntities` is a **batch** endpoint (internally chunks 5 public / 10 private / 100
-  custom-financials). The current `--one-per-request` is a **temporary workaround** for a batch bug
-  fixed in edfx-tessera-service PR #2541 (not yet in prod). Post-fix: switch to `--batch-size` at
-  the service's chunk sizes.
+  custom-financials). `--one-per-request` was a temporary workaround for a batch bug; the fix
+  (PR #2564 / EDFX-28971) deployed to prod 2026-07-24 — batching is now the default. Keep
+  `--workers 3` with batching; 20 workers + batched payloads caused HTTP 502 gateway errors.
 - Eligibility rules `pd_last_known_date` staleness and `financialStmtDate ≤3y` are **intentional
   homegrown validations** (the latter matches unmerged branch EDFX-27547); the service's own
   scheduler uses `as_of_date`/`updated_date` hour-thresholds instead. Public entities are refreshed

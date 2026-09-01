@@ -44,8 +44,8 @@ auto-targets `2026-08-01`; override with `--date-filter YYYY-MM-01`).
 2. **Dry-run** (no posting, confirm count):
    `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --dry-run`
 3. **Live refresh** (posts to prod queue, batched):
-   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --workers 20`
-   (repeat with `--entity-type private`; add `--one-per-request` only if explicitly instructed — see the batch note above).
+   `python refresh_stale_non_public_entities.py --entity-type custom --stale-date-column pd_last_known_date --workers 3`
+   (repeat with `--entity-type private`; add `--one-per-request` only if explicitly instructed — see the batch note above; one-per-request tolerates `--workers 20` but is ~100× slower).
 3b. **Check entity_refresh_status for downstream failures** — entities that received a 200 from
    `refreshEntities` but failed inside the SQS consumer (`EntityRefreshService`) need to be
    resubmitted. This is independent of the stale-date check:
