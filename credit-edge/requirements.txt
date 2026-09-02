@@ -1,0 +1,4 @@
+# Add Python dependencies here as Credit Edge scripts are added.
+# Example:
+# requests>=2.28.0
+# python-dotenv>=1.0.0
