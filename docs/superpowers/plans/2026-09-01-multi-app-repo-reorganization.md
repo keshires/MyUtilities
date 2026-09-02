@@ -207,7 +207,21 @@ aiohttp>=3.8.0
 nest_asyncio>=1.5.0
 ```
 
-- [ ] **Step 6: Verify counts**
+- [ ] **Step 6: Update script paths in edfx/utilities.yaml**
+
+Every `script:` entry in `utilities.yaml` currently lists just the filename (e.g., `script: export_stale_entities_from_excel.py`). After the move scripts live in `scripts/` so the dashboard display would show the wrong path. Update every `script:` entry to include the subfolder prefix:
+
+```yaml
+# Before:
+script: export_stale_entities_from_excel.py
+
+# After:
+script: scripts/export_stale_entities_from_excel.py
+```
+
+Apply this change to every `script:` entry in the file. Do not change any other fields — `args.default`, `output_glob`, and `logs_glob` are all relative to `PROJECT_ROOT` (= `edfx/`) and are already correct.
+
+- [ ] **Step 7: Verify counts**
 
 ```bash
 ls edfx/scripts/ | wc -l   # expect 15
