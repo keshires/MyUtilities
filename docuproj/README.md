@@ -21,7 +21,7 @@ python bootstrap.py            # creates .venv, installs deps, clones the defaul
 ```
 
 `bootstrap.py` is idempotent (re-run to top up). Branches matter — `edfx-api` is `master`,
-the rest `main` (see REPOS.md). Manual equivalent: `python -m venv .venv`, install
+the rest `main` (see ../shared/REPOS.md). Manual equivalent: `python -m venv .venv`, install
 `requirements.txt`, then `git clone --depth 1 --branch <b> …` each repo into `.workspace/edfx-flow/`.
 
 ### One command — trace where an endpoint gets its data

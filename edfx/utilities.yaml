@@ -259,7 +259,7 @@ utilities:
     outputs:
       logs_glob: "run_portfolio_kpis/run_portfolio_kpis_postgres_*"
       output_glob: "run_portfolio_kpis/*"
-    docs: ["Day2Day_Utillites/Docs/run-portfolio-kpis-postgres.md"]
+    docs: ["edfx/runbooks/run-portfolio-kpis-postgres.md"]
     safety: "Executes a stored procedure that recomputes KPIs on prod. Use --list-only to preview."
 
   - id: portfolio-kpi-metrics-postgres
@@ -291,7 +291,7 @@ utilities:
     env_required: [TESSERA_POSTGRES_HOST, TESSERA_POSTGRES_PORT, TESSERA_POSTGRES_DB, TESSERA_POSTGRES_USER, TESSERA_POSTGRES_PASSWORD]
     outputs:
       output_glob: "portfolio_kpi_metrics/*"
-    docs: ["Day2Day_Utillites/Docs/portfolio-kpi-metrics.md"]
+    docs: ["edfx/runbooks/portfolio-kpi-metrics.md"]
     safety: "Read-only against prod Postgres."
 
   # ---------------- edfx-entity-ops ----------------

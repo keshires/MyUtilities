@@ -2,7 +2,7 @@
 
 **Database:** `CreditEdge_Internal`
 **Proc:** `dbo.ce2_get_report_builder_pit_v7`
-**Diagnostic script:** [`Day2Day_Utillites/sql/diagnose_slow_sp_blocking.sql`](../../Day2Day_Utillites/sql/diagnose_slow_sp_blocking.sql)
+**Diagnostic script:** [`credit-edge/sql/diagnose_slow_sp_blocking.sql`](../sql/diagnose_slow_sp_blocking.sql)
 **First investigated:** 2026-07-08
 
 ---
@@ -12,7 +12,7 @@
 If this proc "used to run in 1 second and now takes ~1 minute" **with no meaningful data growth**, it is almost certainly **not** the query itself. The SPID is spending ~59 of those 60 seconds **SUSPENDED, waiting on a lock** held by an in-progress or **rolling-back** transaction on one of the base tables it reads. Run the diagnostic script **while the slow run is happening** and look at Section 1 → Section 3.
 
 **Fast path:**
-1. Run [`diagnose_slow_sp_blocking.sql`](../../Day2Day_Utillites/sql/diagnose_slow_sp_blocking.sql) Section 1 during a slow execution.
+1. Run [`diagnose_slow_sp_blocking.sql`](../sql/diagnose_slow_sp_blocking.sql) Section 1 during a slow execution.
 2. If `wait_type LIKE 'LCK_M_%'` and `blocking_session_id` is set → blocking confirmed. Go to Section 3, find the blocker; if it's in `ROLLING BACK` you've found it. Let the rollback finish or address the process that issued/killed it.
 3. Structural fix so readers stop blocking on writers: enable **`READ_COMMITTED_SNAPSHOT`** on `CreditEdge_Internal` (test tempdb sizing first).
 
@@ -46,7 +46,7 @@ Even though the *trigger* is external, the proc's design amplifies any contentio
 
 ## How to diagnose (run during a slow execution)
 
-Use [`diagnose_slow_sp_blocking.sql`](../../Day2Day_Utillites/sql/diagnose_slow_sp_blocking.sql). It is **read-only** (sets `READ UNCOMMITTED` so the diagnostics don't join the blocking queue) with 7 independent sections:
+Use [`diagnose_slow_sp_blocking.sql`](../sql/diagnose_slow_sp_blocking.sql). It is **read-only** (sets `READ UNCOMMITTED` so the diagnostics don't join the blocking queue) with 7 independent sections:
 
 | # | Section | Answers |
 |---|---------|---------|

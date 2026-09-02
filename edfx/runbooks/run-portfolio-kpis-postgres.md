@@ -10,7 +10,7 @@ Required in `.env` (or the shell): `TESSERA_POSTGRES_HOST`, `TESSERA_POSTGRES_DB
 
 ## Run commands
 
-From the `Day2Day_Utillites` project folder (`run_portfolio_kpis_postgres.py` and `.env` must be here):
+From the `edfx/` folder (`run_portfolio_kpis_postgres.py` is in `scripts/` and `.env` must be at the `edfx/` root):
 
 | Command |
 |---------|

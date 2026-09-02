@@ -9,7 +9,7 @@ import nest_asyncio
 from dotenv import load_dotenv
 
 nest_asyncio.apply()
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 
 def _req(name: str) -> str:

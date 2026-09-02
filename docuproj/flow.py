@@ -42,7 +42,7 @@ def main() -> int:
     matches = [fl for fl in model.flows if needle in fl.endpoint_id.lower()]
     if not matches:
         print(f"\nNo flow found for '{needle}'. The endpoint may touch no DB/downstream, "
-              "or a repo on its path isn't cloned (see REPOS.md). Add --claude for variable-URL hops.")
+              "or a repo on its path isn't cloned (see ../shared/REPOS.md). Add --claude for variable-URL hops.")
         return 0
     for fl in matches[:8]:
         print(f"\n=== {fl.endpoint_id} ===")

@@ -1,7 +1,7 @@
 # Monthly Stale Non-Public Entity Refresh — Runbook
 
 Repeatable monthly process to find and refresh stale **custom** and **private** entities
-by their **PD date**. Run from `Day2Day_Utillites` in PowerShell with `.env` populated.
+by their **PD date**. Run from the `edfx/` folder in PowerShell with `.env` populated.
 The same commands work every month unchanged — `--date-filter` defaults to the **1st of the
 current month**, so running them in August automatically targets `2026-08-01`.
 

@@ -1,7 +1,7 @@
 """
 Portfolio KPI update log metrics (Postgres).
 
-Runs reports from Docs/portfolio-kpi-metrics.sql against public.portfolio_kpi_update_log.
+Runs reports from sql/portfolio-kpi-metrics.sql against public.portfolio_kpi_update_log.
 Uses the same TESSERA_POSTGRES_* settings as run_portfolio_kpis_postgres.py (.env).
 
 Examples:
@@ -11,7 +11,7 @@ Examples:
   python portfolio_kpi_metrics_postgres.py --start "2026-05-20 15:00:00" --end "2026-05-20 18:00:00" --report slow --source "Custom Financials"
   python portfolio_kpi_metrics_postgres.py --start "2026-05-20 00:00:00" --end "2026-05-21 00:00:00" --report hourly --export-csv hourly.csv
 
-Doc: Docs/portfolio-kpi-metrics.md
+Doc: runbooks/portfolio-kpi-metrics.md
 """
 
 from __future__ import annotations
@@ -65,7 +65,7 @@ def load_env(env: str | None, root: Path = PROJECT_ROOT) -> list[Path]:
     return loaded
 
 
-SQL_FILE = PROJECT_ROOT / "Docs" / "portfolio-kpi-metrics.sql"
+SQL_FILE = PROJECT_ROOT / "sql" / "portfolio-kpi-metrics.sql"
 SECTION_HEADER = re.compile(r"^--\s*(REPORT|SETUP):\s*(\w+)\s*$", re.MULTILINE)
 
 REPORT_ALIASES: dict[str, str] = {

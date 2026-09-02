@@ -13,6 +13,14 @@ riskcalc/input/
 riskcalc/output/
 riskcalc/logs/
 
+# Secrets — never commit real .env files
+.env
+.env.*
+!.env.example
+!.env.ci.example
+!.env.qa.example
+!.env.stg.example
+
 # Python bytecode and cache
 __pycache__/
 *.py[cod]

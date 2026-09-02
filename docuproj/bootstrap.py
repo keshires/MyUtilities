@@ -67,7 +67,7 @@ def clone_repos(only: set[str] | None) -> None:
             ["git", "clone", "--depth", "1", "--branch", branch, url, str(dest)]
         )
         if result.returncode != 0:
-            print(f"  ! clone failed for {folder} — check access/branch (see REPOS.md). Continuing.")
+            print(f"  ! clone failed for {folder} — check access/branch (see ../shared/REPOS.md). Continuing.")
 
 
 def main() -> int:

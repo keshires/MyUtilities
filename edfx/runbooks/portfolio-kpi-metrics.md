@@ -8,7 +8,7 @@ Install: `python -m pip install -r requirements.txt`
 
 ## Option A — Python runner
 
-From the `Day2Day_Utillites` project folder:
+From the `edfx/` folder:
 
 | Command |
 |---------|
