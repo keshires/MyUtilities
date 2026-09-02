@@ -1,37 +1,49 @@
 # MyUtilities
 
-Shared repository for support and day-to-day operational utilities.
+Shared repository for support and day-to-day operational utilities across EDFX, Credit Edge, and RiskCalc.
+
+## Repo Structure
+
+```
+MyUtilities/
+│
+├── edfx/               ← EDFX scripts, runbooks, utilities
+├── credit-edge/        ← Credit Edge scripts, runbooks
+├── riskcalc/           ← RiskCalc scripts, runbooks
+│
+├── docuproj/           ← Cross-repo flow analyzer (standalone project)
+│
+├── shared/             ← Code shared across all three apps
+│   ├── REPOS.md        ← Fleet repo registry (DocuProj reads from here)
+│   └── project_paths.py
+│
+├── docs/
+│   ├── architecture.md ← How this repo is organized (the map for new devs)
+│   └── contributing.md ← How to add a new script or runbook
+│
+└── README.md           ← Repo index — what each folder is, quick-start per app
+```
 
 ## Projects
 
 | Folder | Purpose |
 |--------|---------|
-| [**Day2Day_Utillites**](Day2Day_Utillites/) | Python scripts for recurring daily tasks — Postgres KPIs, EDFX/RiskCalc APIs, stale-entity exports, OpenSearch queries, batch loads, and related tooling. See [Day2Day_Utillites/Docs/](Day2Day_Utillites/Docs/) for run guides. |
-| [**DocuProj**](DocuProj/) | Static analyzer for **cross-repo flows** across the EDFX fleet — traces who calls an endpoint and where it gets its data (services → database), with a swimlane dashboard and a Claude Code troubleshooting skill. See [DocuProj/README.md](DocuProj/README.md). |
+| [**edfx/**](edfx/) | Python scripts and runbooks for EDFX — Postgres KPIs, stale-entity refresh, OpenSearch queries, Financials API, DynamoDB batch ops. |
+| [**credit-edge/**](credit-edge/) | Scripts and runbooks for Credit Edge support operations. |
+| [**riskcalc/**](riskcalc/) | Scripts and runbooks for RiskCalc — SecurityService, LC processing. |
+| [**docuproj/**](docuproj/) | Static analyzer for cross-repo flows across the EDFX fleet — traces who calls an endpoint and where it gets its data, with a swimlane dashboard. See [docuproj/README.md](docuproj/README.md). |
+| [**shared/**](shared/) | Utilities and config shared across apps — `project_paths.py`, `REPOS.md` fleet registry. |
 
-## Day2Day_Utillites — quick start
+## Quick Start — pick your app
+
+Each app folder is self-contained: its own `README.md`, `.env.example`, and `requirements.txt`.
 
 ```powershell
-cd Day2Day_Utillites
-copy .env.example .env
-# Edit .env with your credentials
+# Example: EDFX
+cd edfx
+copy .env.example .env          # fill in your credentials
 python -m venv .venv
 .\.venv\Scripts\pip install -r requirements.txt
 ```
 
-Open `Day2Day_Utillites` as the workspace folder in VS Code or Cursor so `${workspaceFolder}` debug configs resolve correctly.
-
-### Utilities catalog & dashboard
-
-The production scripts are cataloged in `Day2Day_Utillites/utilities.yaml`, exposed as
-four Claude Code skills (`.claude/skills/`), and browsable in a read-only dashboard:
-
-```powershell
-cd Day2Day_Utillites
-.\.venv\Scripts\python -m uvicorn dashboard.serve:app --host 127.0.0.1 --port 8021
-# http://127.0.0.1:8021/app/
-```
-
-Each utility reads/writes under per-utility folders: `input/<utility>/`, `output/<utility>/`, `logs/<utility>/`.
-
-See [Day2Day_Utillites/Docs/utilities-catalog.md](Day2Day_Utillites/Docs/utilities-catalog.md).
+See each app's `README.md` for the full setup and script catalog.
