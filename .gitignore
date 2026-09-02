@@ -1,3 +1,14 @@
 # Git worktrees created for isolated development (never track their contents)
 .claude/worktrees/
 DocuProj/.claude/Stage1_InitialDesign/
+
+# Per-app runtime directories (gitignored at each level)
+edfx/input/
+edfx/output/
+edfx/logs/
+credit-edge/input/
+credit-edge/output/
+credit-edge/logs/
+riskcalc/input/
+riskcalc/output/
+riskcalc/logs/
