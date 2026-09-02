@@ -6,9 +6,11 @@ from pathlib import Path
 import aiohttp
 from dotenv import load_dotenv
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import resolve_project_relative
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 
 def _req(name: str) -> str:

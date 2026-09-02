@@ -26,6 +26,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import PROJECT_ROOT, resolve_cli_artifact
 
 try:

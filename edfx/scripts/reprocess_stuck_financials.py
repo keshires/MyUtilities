@@ -43,6 +43,7 @@ from datetime import date, datetime, timezone
 from pathlib import Path
 
 import refresh_stale_non_public_entities as rf
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import output_dir, resolve_cli_artifact
 
 if sys.platform == "win32":

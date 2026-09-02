@@ -31,6 +31,8 @@ import asyncpg
 import pandas as pd
 from dotenv import load_dotenv
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import input_dir, output_dir, resolve_cli_artifact
 
 log = logging.getLogger(__name__)
@@ -41,7 +43,7 @@ _EXCEL_EXTERNAL_ID_HEADERS = frozenset({"external_id", "externalid", "external i
 
 
 def _load_dotenv() -> None:
-    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 
 def _pick_external_id_column(columns: list[object]) -> str:

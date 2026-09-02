@@ -5,6 +5,8 @@ import json
 from pathlib import Path
 from typing import TypedDict
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 import project_paths
 from dashboard.manifest import Utility
 

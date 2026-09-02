@@ -6,6 +6,8 @@ from pathlib import Path
 import yaml
 from pydantic import BaseModel, ValidationError
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 import project_paths
 
 MANIFEST_PATH = project_paths.PROJECT_ROOT / "utilities.yaml"

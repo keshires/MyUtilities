@@ -27,9 +27,10 @@ from typing import Any
 import requests
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import logs_dir
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 
 def parse_entity_ids(raw: str) -> list[str]:

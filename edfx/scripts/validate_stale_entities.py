@@ -43,9 +43,10 @@ import asyncpg
 from dotenv import load_dotenv
 
 import refresh_stale_non_public_entities as rf
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import logs_dir, output_dir, resolve_cli_artifact
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 if sys.platform == "win32":
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")

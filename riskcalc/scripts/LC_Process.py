@@ -4,6 +4,8 @@ from pathlib import Path
 
 from dotenv import load_dotenv
 
+import sys
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import resolve_project_relative
 
 
@@ -42,7 +44,7 @@ def build_folder_path(
 
 # Example usage
 if __name__ == "__main__":
-    load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+    load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
     raw_root = (os.getenv("LC_BATCH_ROOT_FOLDER") or "").strip()
     RootFolderPath = resolve_project_relative(raw_root) if raw_root else ""
     if not RootFolderPath:

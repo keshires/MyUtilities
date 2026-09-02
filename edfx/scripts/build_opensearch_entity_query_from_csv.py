@@ -70,9 +70,10 @@ from typing import Sequence
 
 from dotenv import load_dotenv
 
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import input_dir, resolve_cli_artifact
 
-load_dotenv(Path(__file__).resolve().parent / ".env", override=False)
+load_dotenv(Path(__file__).resolve().parent.parent / ".env", override=False)
 
 DEFAULT_BULK_DIR = input_dir("build_opensearch_query")
 DEFAULT_QUERIES_ENTITIES_PER_FILE = 100

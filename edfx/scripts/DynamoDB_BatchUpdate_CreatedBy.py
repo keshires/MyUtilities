@@ -66,6 +66,8 @@ import sys
 import logging
 from datetime import datetime, timezone
 
+from pathlib import Path
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "shared"))
 from project_paths import logs_dir
 
 # ==================== ENVIRONMENT SELECTION ====================
