@@ -1,18 +1,42 @@
-"""Day2Day Utilities — central layout: per-utility folders under ``input/<utility>/``, ``output/<utility>/``, and ``logs/<utility>/``.
+"""Shared path utilities — caller-aware project root for edfx/, credit-edge/, and riskcalc/.
 
-Relative paths from CLI or from ``.env`` (when documented) resolve against the
-project root so runs are consistent regardless of current working directory.
+PROJECT_ROOT resolves to the app folder (<app>/) by walking the call stack to find
+the first non-internal caller. All consuming scripts live at <app>/<subfolder>/,
+so caller.parent.parent == <app>/.
 """
 
 from __future__ import annotations
 
+import inspect
+import sys
 from pathlib import Path
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+
+def _find_app_root() -> Path:
+    for frame_info in inspect.stack():
+        filename = frame_info.filename
+        # Skip synthetic/frozen frames (e.g. <frozen importlib._bootstrap>)
+        if filename.startswith("<"):
+            continue
+        p = Path(filename).resolve()
+        # Skip project_paths.py itself
+        if p.name == "project_paths.py":
+            continue
+        # Skip venv frames
+        if str(p).startswith(sys.prefix):
+            continue
+        # Skip Python stdlib (base Python installation)
+        if str(p).startswith(sys.base_prefix):
+            continue
+        return p.parent.parent
+    return Path.cwd()
+
+
+PROJECT_ROOT = _find_app_root()
 
 
 def logs_dir(*parts: str) -> Path:
-    """``<repo>/logs/<parts...>/`` — runtime logs. No args → flat ``<repo>/logs``."""
+    """``<app>/logs/<parts...>/`` — runtime logs."""
     d = PROJECT_ROOT / "logs"
     for p in parts:
         d = d / p
@@ -21,7 +45,7 @@ def logs_dir(*parts: str) -> Path:
 
 
 def output_dir(*parts: str) -> Path:
-    """``<repo>/output/<parts...>/`` — CSV/JSON/Excel artifacts."""
+    """``<app>/output/<parts...>/`` — CSV/JSON/Excel artifacts."""
     d = PROJECT_ROOT / "output"
     for p in parts:
         d = d / p
@@ -30,7 +54,7 @@ def output_dir(*parts: str) -> Path:
 
 
 def input_dir(*parts: str) -> Path:
-    """``<repo>/input/<parts...>/`` — input files a utility reads."""
+    """``<app>/input/<parts...>/`` — input files a utility reads."""
     d = PROJECT_ROOT / "input"
     for p in parts:
         d = d / p
@@ -39,10 +63,7 @@ def input_dir(*parts: str) -> Path:
 
 
 def resolve_project_relative(path_str: str) -> str:
-    """
-    For .env path values: if not absolute, treat as relative to PROJECT_ROOT.
-    Empty strings are returned unchanged.
-    """
+    """For .env path values: if not absolute, treat as relative to PROJECT_ROOT."""
     s = (path_str or "").strip()
     if not s:
         return s
@@ -52,14 +73,8 @@ def resolve_project_relative(path_str: str) -> str:
     return str(PROJECT_ROOT / p)
 
 
-def resolve_cli_artifact(
-    path: Path,
-    *output_subfolders: str,
-) -> Path:
-    """
-    CLI output path: absolute paths unchanged; relative paths go under
-    ``output/<subfolders>/``.
-    """
+def resolve_cli_artifact(path: Path, *output_subfolders: str) -> Path:
+    """CLI output path: absolute unchanged; relative → output/<subfolders>/."""
     path = path.expanduser()
     if path.is_absolute():
         return path
