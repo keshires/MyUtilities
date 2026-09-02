@@ -6,7 +6,7 @@
       "type": "debugpy",
       "request": "launch",
       "python": "${workspaceFolder}/.venv/Scripts/python.exe",
-      "program": "${workspaceFolder}/financials_delete_custom_entity.py",
+      "program": "${workspaceFolder}/scripts/financials_delete_custom_entity.py",
       "console": "integratedTerminal",
       "cwd": "${workspaceFolder}",
       "justMyCode": true,

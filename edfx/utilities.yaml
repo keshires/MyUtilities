@@ -12,7 +12,7 @@ utilities:
   # ---------------- stale-entity-refresh ----------------
   - id: export-stale-entities-from-excel
     name: Export Stale Entities from Excel
-    script: export_stale_entities_from_excel.py
+    script: scripts/export_stale_entities_from_excel.py
     category: stale-entity-refresh
     purpose: "Read external_id column from Excel, find entities not updated in N days, export distinct stale ids to CSV."
     invocation: cli
@@ -34,7 +34,7 @@ utilities:
 
   - id: validate-stale-entities
     name: Validate / Reconcile Stale Entities
-    script: validate_stale_entities.py
+    script: scripts/validate_stale_entities.py
     category: stale-entity-refresh
     purpose: "Re-run the stale query and export every still-stale entity to CSV with entity_data flattened."
     invocation: cli
@@ -65,7 +65,7 @@ utilities:
 
   - id: refresh-stale-non-public-entities
     name: Refresh Stale Non-Public Entities
-    script: refresh_stale_non_public_entities.py
+    script: scripts/refresh_stale_non_public_entities.py
     category: stale-entity-refresh
     purpose: "Refresh stale private/custom entities via the Tessera refreshEntities API in batches with retries, per-tenant iteration, and resume."
     invocation: cli
@@ -128,7 +128,7 @@ utilities:
 
   - id: monitor-entity-refresh-status
     name: Monitor Entity Refresh Status
-    script: monitor_entity_refresh_status.py
+    script: scripts/monitor_entity_refresh_status.py
     category: stale-entity-refresh
     purpose: "Query entity_refresh_status for downstream processing failures and optionally resubmit those entities to refreshEntities."
     invocation: cli
@@ -177,7 +177,7 @@ utilities:
 
   - id: test-single-entity-refresh
     name: Verify Single Entity Refresh
-    script: test_single_entity_refresh.py
+    script: scripts/test_single_entity_refresh.py
     category: stale-entity-refresh
     purpose: "Refresh the top-N stale entities one at a time and poll until pd_last_known_date advances — used to verify the refresh path end-to-end."
     invocation: cli
@@ -214,7 +214,7 @@ utilities:
 
   - id: validate-pd-precheck
     name: PD Pre-Check Report
-    script: validate_pd_precheck.py
+    script: scripts/validate_pd_precheck.py
     category: stale-entity-refresh
     purpose: "PD refresh-eligibility validation. Classify stale entities (by pd_last_known_date, financialStmtDate<=3y) into refreshable/orphaned/no-pd buckets using the authoritative /edfx/v1/entities/pds check (private=externalId, custom=externalId-financialsProcessId), with /entity/v1/mapping fallback (empty => orphaned/delete-candidate). Custom also flags financials_process_status<>Completed (financials_not_completed.csv). Public is DB-only (fresh = current-month PD + Active/null status). Read-only; never posts."
     invocation: cli
@@ -239,7 +239,7 @@ utilities:
   # ---------------- portfolio-kpi-ops ----------------
   - id: run-portfolio-kpis-postgres
     name: Run Portfolio KPIs
-    script: run_portfolio_kpis_postgres.py
+    script: scripts/run_portfolio_kpis_postgres.py
     category: portfolio-kpi-ops
     purpose: "List portfolio ids and/or run the calculate_portfolio_kpis(id) stored procedure per portfolio."
     invocation: cli
@@ -264,7 +264,7 @@ utilities:
 
   - id: portfolio-kpi-metrics-postgres
     name: Portfolio KPI Metrics
-    script: portfolio_kpi_metrics_postgres.py
+    script: scripts/portfolio_kpi_metrics_postgres.py
     category: portfolio-kpi-ops
     purpose: "Optimized reports on portfolio_kpi_update_log via session temp tables: daily/hourly/status volume, per-source/entity/portfolio counts, day/source/status breakdowns, 2D pivots, and slow-message analysis. Multi-env via --env."
     invocation: cli
@@ -297,7 +297,7 @@ utilities:
   # ---------------- edfx-entity-ops ----------------
   - id: financials-delete-custom-entity
     name: Delete Custom Entity
-    script: financials_delete_custom_entity.py
+    script: scripts/financials_delete_custom_entity.py
     category: edfx-entity-ops
     purpose: "DELETE one or many custom entities via the EDFX Financials API."
     invocation: cli
@@ -322,7 +322,7 @@ utilities:
 
   - id: edfx-process-status
     name: EDFX Process Status
-    script: EDFX_ProcessStatus.py
+    script: scripts/EDFX_ProcessStatus.py
     category: edfx-entity-ops
     purpose: "Authenticate via SSO, load process ids from Postgres, fetch statuses in parallel, write a multi-sheet Excel error report."
     invocation: env-config
@@ -335,7 +335,7 @@ utilities:
 
   - id: build-opensearch-entity-query-from-csv
     name: Build OpenSearch Entity Query
-    script: build_opensearch_entity_query_from_csv.py
+    script: scripts/build_opensearch_entity_query_from_csv.py
     category: edfx-entity-ops
     purpose: "Build OpenSearch _search JSON and queries payload files from a CSV companyIdentifier column, chunked."
     invocation: cli
@@ -373,7 +373,7 @@ utilities:
   # ---------------- dynamo-batch-update ----------------
   - id: dynamodb-batch-update-createdby
     name: DynamoDB Batch Update (CreatedBy)
-    script: DynamoDB_BatchUpdate_CreatedBy.py
+    script: scripts/DynamoDB_BatchUpdate_CreatedBy.py
     category: dynamo-batch-update
     purpose: "Scan a DynamoDB table and batch-update a field value, with dry-run safety and parallel writes."
     invocation: env-config
