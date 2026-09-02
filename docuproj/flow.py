@@ -25,7 +25,7 @@ def main() -> int:
     if "/git/" in needle or (len(needle) > 2 and needle[1] == ":"):
         needle = needle.rsplit("/", 1)[-1]
     if not WS.exists():
-        print(f"No repos cloned in {WS}. See the troubleshooting-edfx-flows skill / REPOS.md.")
+        print(f"No repos cloned in {WS}. See the troubleshooting-edfx-flows skill / ../shared/REPOS.md.")
         return 1
 
     specs = []

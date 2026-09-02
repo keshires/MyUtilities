@@ -12,7 +12,7 @@ endpoint (UI/config), and — forward — where it gets its data (downstream ser
 Use it to answer "what does this endpoint touch?" without reading every repo by hand.
 
 All commands run from the **`DocuProj/`** directory. Cloned repos live in the gitignored
-`.workspace/edfx-flow/`. The full fleet + each repo's default branch are in **`REPOS.md`**.
+`.workspace/edfx-flow/`. The full fleet + each repo's default branch are in **`../shared/REPOS.md`**.
 
 ## One-time setup
 
@@ -29,7 +29,7 @@ skip Step 1. Manual equivalent: `python -m venv .venv && ./.venv/Scripts/pip ins
 
 A repo is invisible until it's cloned into `.workspace`. `bootstrap.py` covers the default chain;
 clone others on your path here. **`edfx-api` is branch `master`; most others are `main`**
-(check `REPOS.md`). Example for a UI→gateway→Tessera→DB question:
+(check `../shared/REPOS.md`). Example for a UI→gateway→Tessera→DB question:
 
 ```bash
 WS=.workspace/edfx-flow
@@ -109,8 +109,8 @@ Edge kinds: `http` (service call), `db` (DB read). `code_ref` is the exact file:
 - **Variable-URL hops missing:** gateway→service calls like `tessera_client.get(url)` only link with
   `ClaudeResolver()` + `ANTHROPIC_API_KEY` — deterministic matching can't resolve a runtime variable.
 - **Unsupported language:** `edfx-bond-api` is .NET and `edfx-render-pdf-reports` is Node — no/partial
-  extractor, so flows stop at those repos (see `REPOS.md`).
+  extractor, so flows stop at those repos (see `../shared/REPOS.md`).
 
 ## Reference
-- `REPOS.md` — the 21-repo fleet, languages, and default branches.
+- `../shared/REPOS.md` — the 21-repo fleet, languages, and default branches.
 - `docs/2026-06-09-docuproj-design.md` — design spec; `docs/plans/` — how each capability was built.

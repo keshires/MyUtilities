@@ -69,7 +69,7 @@ dashboard/     no-build HTML/CSS/JS swimlane UI (served by FastAPI)
 projects/      sample project.json inputs (edfx-flow.json)
 tests/         74 tests (offline; real repos validated separately)
 docs/          design spec + docs/plans/ (how each capability was built)
-REPOS.md       the 21-repo EDFX fleet, languages, default branches
+../shared/REPOS.md    the 21-repo EDFX fleet, languages, default branches
 bootstrap.py   one-step setup (venv + deps + clone chain)
 flow.py        one-command tracer    serve_demo.py / claude_demo.py   demo entrypoints
 ```

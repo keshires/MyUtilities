@@ -9,7 +9,7 @@ repo already cloned. Run from the DocuProj/ directory with the system Python:
     python bootstrap.py --repos a,b     # clone only these folder names from the chain
 
 Edit DEFAULT_CHAIN below to change which repos a bare run clones. Branches matter:
-edfx-api is `master`, the rest `main` (see REPOS.md).
+edfx-api is `master`, the rest `main` (see ../shared/REPOS.md).
 """
 
 import subprocess
@@ -21,7 +21,7 @@ WS = Path(".workspace/edfx-flow")
 VENV = Path(".venv")
 
 # (folder, language, branch) — the UI -> gateway -> service -> DB chain documented in the README.
-# `language` is informational here; flow.py auto-detects it. Add rows from REPOS.md as needed.
+# `language` is informational here; flow.py auto-detects it. Add rows from ../shared/REPOS.md as needed.
 DEFAULT_CHAIN = [
     ("edfx-app-ui", "angular", "main"),
     ("edfx-api", "python", "master"),
