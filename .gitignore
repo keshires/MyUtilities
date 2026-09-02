@@ -12,3 +12,11 @@ credit-edge/logs/
 riskcalc/input/
 riskcalc/output/
 riskcalc/logs/
+
+# Python bytecode and cache
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
